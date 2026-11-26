@@ -15,13 +15,14 @@ export interface InferenceTelemetry {
   id: string;
   taskKind: TaskKind;
   requestedMode: InferenceMode;
-  actualSource: InferenceSource | 'blocked_offline_privacy' | 'error';
+  actualSource: InferenceSource | 'pending_source' | 'source_unverified' | 'local_emulator' | 'blocked_offline_privacy' | 'error';
+  sourceEvidence?: 'sdk_terminal_response';
   modelLabel: string;
   onlineAtStart: boolean;
   appCheckMode: AppCheckMode;
   ttftMs: number | null;
   totalMs: number;
-  estimatedCloudCostUsd: number;
+  estimatedCloudCostUsd: number | null;
   inputModalities: ('text' | 'image')[];
   timestamp: number;
 }

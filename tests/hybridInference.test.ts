@@ -121,7 +121,7 @@ describe('Firebase AI Logic Hybrid Inference SDK Contract', () => {
     expect(emulator.getRequests()).toHaveLength(0);
   });
 
-  it('falls back to cloud with X-Firebase-AppCheck + hybrid header when LanguageModel is unavailable', async () => {
+  it('falls back to the local emulator with the App Check and hybrid headers without claiming real cloud', async () => {
     installMockLanguageModel('unavailable');
 
     const result = await runHybridPrompt(
@@ -137,7 +137,8 @@ describe('Firebase AI Logic Hybrid Inference SDK Contract', () => {
       () => {}
     );
 
-    expect(result.telemetry.actualSource).toBe(InferenceSource.IN_CLOUD);
+    expect(result.telemetry.actualSource).toBe('local_emulator');
+    expect(result.telemetry.estimatedCloudCostUsd).toBe(0);
     expect(result.text).toContain('patchOps');
 
     const cloudCalls = emulator.getRequests();
@@ -168,7 +169,7 @@ describe('Firebase AI Logic Hybrid Inference SDK Contract', () => {
     expect(emulator.getRequests()).toHaveLength(0);
   });
 
-  it('routes multimodal PNG inlineData locally when available and falls back to cloud when unavailable', async () => {
+  it('routes multimodal PNG inlineData locally or reports the local emulator when Nano is unavailable', async () => {
     installMockLanguageModel('available');
     const localVision = await runHybridPrompt(
       {
@@ -200,7 +201,8 @@ describe('Firebase AI Logic Hybrid Inference SDK Contract', () => {
       },
       () => {}
     );
-    expect(cloudVision.telemetry.actualSource).toBe(InferenceSource.IN_CLOUD);
+    expect(cloudVision.telemetry.actualSource).toBe('local_emulator');
+    expect(cloudVision.telemetry.estimatedCloudCostUsd).toBe(0);
     expect(emulator.getRequests()).toHaveLength(1);
   });
 });

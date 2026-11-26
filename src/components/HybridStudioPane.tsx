@@ -4,6 +4,7 @@ import {
   Camera,
   Check,
   Cloud,
+  Clock,
   Cpu,
   Lock,
   Send,
@@ -221,7 +222,7 @@ export function HybridStudioPane({
             data-testid="concierge-prompt-input"
             value={conciergeInput}
             onChange={(e) => setConciergeInput(e.target.value)}
-            placeholder="Ask anything about your trip (works offline via Gemini Nano or falls back to cloud Gemini)..."
+            placeholder="Ask about your trip on this device; cloud requires an explicit mode selection."
             className="w-full rounded-lg border border-stone-300 bg-white p-2.5 text-xs text-stone-900 outline-none focus:border-emerald-500"
           />
           <div className="flex items-center justify-between gap-2">
@@ -395,40 +396,76 @@ export function HybridStudioPane({
       <div className="space-y-3" data-testid="proposal-feed">
         {proposals.length === 0 ? (
           <div className="rounded-xl border border-dashed border-stone-200 p-6 text-center text-xs text-stone-500">
-            Run any task above to watch Firebase AI Logic route between Chrome Gemini Nano and
-            cloud Gemini fallback in real time.
+            Run a task to see where the model actually ran. The timeline remains editable
+            on this device without AI or cloud access.
           </div>
         ) : (
           proposals.map((p) => {
-            const isOnDevice = p.telemetry.actualSource === InferenceSource.ON_DEVICE;
-            const isBlocked = p.telemetry.actualSource === 'blocked_offline_privacy';
+            const source = p.telemetry.actualSource;
+            const completedBySdk = p.telemetry.sourceEvidence === 'sdk_terminal_response' && Boolean(p.responseText.trim());
+            const isOnDevice = completedBySdk && source === InferenceSource.ON_DEVICE;
+            const isCloud = completedBySdk && source === InferenceSource.IN_CLOUD;
+            const isEmulator = completedBySdk && source === 'local_emulator';
+            const isBlocked = source === 'blocked_offline_privacy';
             const isError = p.status === 'error';
-
-            const sourceBadge = isOnDevice
-              ? {
-                  label: 'ON-DEVICE · Gemini Nano',
-                  cls: 'border-emerald-300 bg-emerald-100 text-emerald-900',
-                  icon: <Cpu className="h-3.5 w-3.5" />,
-                }
-              : isBlocked
-                ? {
-                    label: 'BLOCKED LOCALLY · Privacy Shield (0 bytes sent)',
-                    cls: 'border-amber-300 bg-amber-100 text-amber-900',
-                    icon: <ShieldAlert className="h-3.5 w-3.5" />,
-                  }
-                : isError
-                  ? {
-                      label: 'EXECUTION ERROR',
-                      cls: 'border-rose-300 bg-rose-100 text-rose-900',
-                      icon: <X className="h-3.5 w-3.5" />,
-                    }
-                  : {
-                      label: 'IN-CLOUD · Gemini Fallback',
-                      cls: 'border-blue-300 bg-blue-100 text-blue-900',
-                      icon: <Cloud className="h-3.5 w-3.5" />,
-                    };
+            const sourceBadge = (() => {
+              if (p.status === 'streaming') return {
+                label: 'RUNNING · Source not yet confirmed',
+                cls: 'border-stone-300 bg-stone-100 text-stone-900',
+                icon: <Clock className="h-3.5 w-3.5" />,
+              };
+              if (source === 'source_unverified') return {
+                label: 'SOURCE UNVERIFIED · Result not used',
+                cls: 'border-amber-300 bg-amber-100 text-amber-900',
+                icon: <ShieldAlert className="h-3.5 w-3.5" />,
+              };
+              if (isBlocked) return {
+                label: 'BLOCKED BEFORE DISPATCH · Privacy Shield (0 bytes sent)',
+                cls: 'border-amber-300 bg-amber-100 text-amber-900',
+                icon: <ShieldAlert className="h-3.5 w-3.5" />,
+              };
+              if (isError) return {
+                label: 'NO COMPLETED MODEL RESULT',
+                cls: 'border-rose-300 bg-rose-100 text-rose-900',
+                icon: <X className="h-3.5 w-3.5" />,
+              };
+              if (isOnDevice) return {
+                label: 'ON-DEVICE · Gemini Nano',
+                cls: 'border-emerald-300 bg-emerald-100 text-emerald-900',
+                icon: <Cpu className="h-3.5 w-3.5" />,
+              };
+              if (isEmulator) return {
+                label: 'LOCAL EMULATOR · Not Firebase cloud',
+                cls: 'border-stone-300 bg-stone-100 text-stone-900',
+                icon: <Cpu className="h-3.5 w-3.5" />,
+              };
+              return {
+                label: isCloud ? 'IN-CLOUD · Gemini' : 'SOURCE UNVERIFIED · Result not used',
+                cls: isCloud ? 'border-blue-300 bg-blue-100 text-blue-900' :
+                  'border-amber-300 bg-amber-100 text-amber-900',
+                icon: isCloud ? <Cloud className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />,
+              };
+            })();
+            const recoveryByCode = new Map<string, string>(Object.entries({
+                             REQ211_DAILY_ATTEMPTS_EXHAUSTED: 'The local daily cloud allowance is used. No App Check or model request was started. Use the local timeline.',
+               REQ211_DAILY_BUDGET_UNAVAILABLE: 'The app cannot verify a persistent local attempt count. Cloud was not started. Use the local timeline.',
+               REQ211_CLOUD_BUSY: 'A cloud request is already in progress. No duplicate cloud request or automatic retry was started.',
+               REQ211_CLOUD_QUOTA_STOP: 'Cloud quota was unavailable. This request was not retried.',
+              REQ211_CLOUD_OFFLINE_STOP: 'This device is offline. No cloud request was started.',
+              REQ211_APP_CHECK_UNAVAILABLE: 'Approved cloud access is unavailable in this build.',
+              REQ211_CLOUD_PERMISSION_STOP: 'Cloud access was denied. This request was not retried.',
+              REQ211_INFERENCE_SOURCE_UNVERIFIED: 'The model did not confirm where it ran. Its output was discarded.',
+              REQ211_RUNTIME_NOT_READY: 'The AI service did not start. Run again to retry the local setup, or use the local timeline.',
+              REQ211_TERMINAL_TEXT_MISSING: 'The SDK completed without a usable reply. No provider result was recorded. You can run again.',
+              REQ211_NATIVE_TIME_LIMIT: 'The device model did not finish within 30 seconds. No partial result was used. You can run again after it stops.',
+              REQ211_NATIVE_DRAINING: 'The previous device request is still stopping. No second model request was started.',
+            }));
+            const recoveryText = recoveryByCode.get(p.errorMessage ?? '') ||
+              (isBlocked ? 'Gemini Nano is unavailable. The request stopped before any model call.' :
+                'The AI request stopped without a completed result.');
 
             const cleanBody = stripJsonBlocksForDisplay(p.responseText);
+            const mayApply = (isOnDevice || isCloud || isEmulator) && Boolean(p.responseText.trim());
 
             return (
               <article
@@ -455,20 +492,28 @@ export function HybridStudioPane({
                     <span>Total {p.telemetry.totalMs}ms</span>
                     <span>·</span>
                     <span className="font-semibold text-stone-700">
-                      {isOnDevice || isBlocked ? '$0.00 local' : 'Cloud fallback'}
+                      {!isError && p.status !== 'streaming' && isOnDevice ? 'Local inference' :
+                        !isError && p.status !== 'streaming' && isCloud ? 'Cloud inference' :
+                        !isError && p.status !== 'streaming' && isEmulator ? 'Emulated response' : 'No source claim'}
                     </span>
                   </div>
                 </div>
 
                 {p.status === 'error' ? (
-                  <p className="mt-2.5 text-xs font-medium text-rose-800">{p.errorMessage}</p>
+                  <div className="mt-2.5 space-y-1 text-xs text-stone-700" role="status">
+                    <p className="font-medium text-rose-800">{recoveryText}</p>
+                    <p>No changes from this request were applied.</p>
+                    <a href="#local-itinerary" className="inline-flex min-h-11 items-center font-semibold text-emerald-800 underline">
+                      Continue in the local timeline
+                    </a>
+                  </div>
                 ) : (
                   <div className="mt-2.5 whitespace-pre-wrap text-xs leading-relaxed text-stone-800">
                     {cleanBody || (p.status === 'streaming' ? 'Streaming response...' : '')}
                   </div>
                 )}
 
-                {p.patchOps.length > 0 && p.diffSummary && (
+                {mayApply && p.patchOps.length > 0 && p.diffSummary && (
                   <div
                     data-testid="deterministic-diff-card"
                     className="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-3 text-xs"

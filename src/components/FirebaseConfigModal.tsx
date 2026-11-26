@@ -19,8 +19,8 @@ export function FirebaseConfigModal({open, onClose, cloudConfigured}: FirebaseCo
         </div>
         <p className="mt-2 text-sm text-stone-700">{cloudConfigured
           ? 'A fixed Firebase Web App is configured. Each text request still requires its own verified App Check token.'
-          : 'Cloud fallback is locked. You can still use this demo locally.'}</p>
-        <p className="mt-2 text-xs text-stone-500">The project, App Check provider and fallback model are fixed by the reviewed build. Trip storage, private notes and photos stay local.</p>
+          : 'Cloud is locked. You can still use this demo locally.'}</p>
+        <p className="mt-2 text-xs text-stone-500">The project, App Check provider and cloud model are fixed by the reviewed build. Trip storage, private notes and photos stay local.</p>
       </section>
     </div>
   );

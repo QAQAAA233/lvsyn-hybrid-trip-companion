@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { InferenceMode } from 'firebase/ai';
 import {
   checkOnDeviceAvailability,
@@ -31,31 +31,32 @@ import {
 } from './domain/scheduleEngine';
 import type { DayOfWeek, Trip, TripStop } from './domain/trip';
 import { initializeFirebaseServices, type FirebaseRuntimeHandle } from './firebase/init';
+import { CLOUD_ATTEMPT_KEY, readCloudAttemptStatus, type CloudAttemptStatus } from './firebase/cloudAttemptBudget';
 import {
   loadLocalTrips,
   saveLocalTrips,
-  syncTripToFirestoreIfEnabled,
+  type LocalTripSaveResult,
 } from './firebase/tripRepository';
 
 export function App() {
   const [trips, setTrips] = useState<Trip[]>(() => loadLocalTrips());
-  const [activeTripId, setActiveTripId] = useState<string>(() => loadLocalTrips()[0]?.id || 'kyoto-family-tue');
+  const tripsRef = useRef(trips);
+  const [localSaveStatus, setLocalSaveStatus] = useState<LocalTripSaveResult|'ready'>('ready');
+  const [activeTripId, setActiveTripId] = useState<string>(() => trips[0]?.id || 'kyoto-family-tue');
   const [activeTab, setActiveTab] = useState<TaskKind>('concierge');
 
   const [isOnline, setIsOnline] = useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
   const [firebaseHandle, setFirebaseHandle] = useState<FirebaseRuntimeHandle | null>(null);
+  const [cloudAttemptStatus,setCloudAttemptStatus] = useState<CloudAttemptStatus|null>(null);
+  const cloudBound=Boolean(firebaseHandle?.setup.isLiveProject);
   const [nanoAvailability, setNanoAvailability] =
     useState<LocalModelAvailability>('unavailable');
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
   const [inferenceMode, setInferenceMode] = useState<InferenceMode>(
     InferenceMode.PREFER_ON_DEVICE
   );
-  const [syncStatus, setSyncStatus] = useState<
-    'local_only' | 'firestore_synced' | 'firestore_offline_queued'
-  >('local_only');
-
   const [proposals, setProposals] = useState<TripProposal[]>([]);
   const [telemetryEntries, setTelemetryEntries] = useState<InferenceTelemetry[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -69,11 +70,14 @@ export function App() {
   const evaluation = useMemo(() => evaluateTripSchedule(activeTrip), [activeTrip]);
 
   const bootstrapSdk = useCallback(async () => {
-    const handle = await initializeFirebaseServices();
-    setFirebaseHandle(handle);
-    setInferenceMode(handle.remotePolicy.defaultInferenceMode);
-    const avail = await checkOnDeviceAvailability(false);
-    setNanoAvailability(avail);
+    try {
+      const handle = await initializeFirebaseServices();
+      setFirebaseHandle(handle);
+      setNanoAvailability(await checkOnDeviceAvailability(false));
+    } catch {
+      // Keep the timeline available. A later deliberate Run attempts a fresh local session.
+      setNanoAvailability('unavailable');
+    }
   }, []);
 
   useEffect(() => {
@@ -91,23 +95,36 @@ export function App() {
     };
   }, []);
 
+  useEffect(()=>{
+    if(!cloudBound) {setCloudAttemptStatus(null);return;}
+    const update=()=>setCloudAttemptStatus(readCloudAttemptStatus());
+    const observe=(event:StorageEvent)=>{if(event.key===CLOUD_ATTEMPT_KEY||event.key===null) update();};
+    update();
+    window.addEventListener('storage',observe);
+    window.addEventListener('focus',update);
+    const interval=window.setInterval(update,60_000);
+    return ()=>{
+      window.removeEventListener('storage',observe);
+      window.removeEventListener('focus',update);
+      window.clearInterval(interval);
+    };
+  },[cloudBound]);
+
+  const commitLocalTrips=useCallback((next:Trip[])=>{
+    // Apply the edit regardless of disk availability; no write side effect inside a React updater.
+    tripsRef.current=next;
+    setTrips(next);
+    setLocalSaveStatus(saveLocalTrips(next));
+  },[]);
+  const retryLocalSave=useCallback(()=>{
+    // A deliberate retry always writes the latest local edit, not an older captured trip.
+    setLocalSaveStatus(saveLocalTrips(tripsRef.current));
+  },[]);
   const persistTripUpdate = useCallback(
     (updater: (prev: Trip) => Trip) => {
-      setTrips((prevList) => {
-        const nextList = prevList.map((t) =>
-          t.id === activeTrip.id ? updater(t) : t
-        );
-        saveLocalTrips(nextList);
-        const updated = nextList.find((t) => t.id === activeTrip.id);
-        if (updated) {
-          void syncTripToFirestoreIfEnabled(firebaseHandle, updated).then(
-            setSyncStatus
-          );
-        }
-        return nextList;
-      });
+      commitLocalTrips(tripsRef.current.map(t=>t.id===activeTrip.id ? updater(t) : t));
     },
-    [activeTrip.id, firebaseHandle]
+    [activeTrip.id, commitLocalTrips]
   );
 
   const handleInitializeNano = async () => {
@@ -141,7 +158,6 @@ export function App() {
       label: string;
     };
   }) => {
-    if (!firebaseHandle) return;
     setIsRunning(true);
 
     const proposalId = `prop-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -165,13 +181,13 @@ export function App() {
       id: `tel-pending-${proposalId}`,
       taskKind,
       requestedMode,
-      actualSource: InferenceMode.ONLY_IN_CLOUD === requestedMode ? 'in_cloud' : 'on_device',
+      actualSource: 'pending_source',
       modelLabel: 'Running...',
       onlineAtStart: isOnline,
-      appCheckMode: firebaseHandle.appCheckMode,
+      appCheckMode: firebaseHandle?.appCheckMode ?? 'unconfigured',
       ttftMs: null,
       totalMs: 0,
-      estimatedCloudCostUsd: 0,
+      estimatedCloudCostUsd: null,
       inputModalities: imageAttachment ? ['text', 'image'] : ['text'],
       timestamp: Date.now(),
     };
@@ -190,8 +206,13 @@ export function App() {
     setProposals((prev) => [placeholder, ...prev]);
 
     try {
+      // Recover a failed prep on this user action only; never silently switch providers.
+      const runtime = firebaseHandle ?? await initializeFirebaseServices().catch(() => {
+        throw new Error('REQ211_RUNTIME_NOT_READY');
+      });
+      if (!firebaseHandle) setFirebaseHandle(runtime);
       const result = await runCompetitionPrompt(
-        firebaseHandle,
+        runtime,
         {
           taskKind,
           requestedMode,
@@ -241,13 +262,13 @@ export function App() {
         )
       );
       setTelemetryEntries((prev) => [result.telemetry, ...prev]);
-      setNanoAvailability(await checkOnDeviceAvailability(false));
+      void checkOnDeviceAvailability(false).then(setNanoAvailability, () => undefined);
     } catch (err) {
       const enriched = err as Error & { telemetry?: InferenceTelemetry };
       const failedTelemetry: InferenceTelemetry = enriched.telemetry ?? {
         ...initialTelemetry,
         actualSource: 'error',
-        modelLabel: firebaseHandle.remotePolicy.cloudFallbackModel,
+        modelLabel: 'No completed model result',
       };
       setProposals((prev) =>
         prev.map((item) =>
@@ -255,10 +276,9 @@ export function App() {
             ? {
                 ...item,
                 status: 'error',
-                errorMessage:
-                  taskKind === 'privacy_vault'
-                    ? `Blocked locally by Privacy Shield (${failedTelemetry.requestedMode}): Chrome Gemini Nano is unavailable on this browser, so 0 bytes were sent to any cloud server.`
-                    : enriched.message || 'Inference failed.',
+                responseText: '',
+                patchOps: [],
+                errorMessage: enriched.message || 'Inference failed.',
                 telemetry: failedTelemetry,
               }
             : item
@@ -266,13 +286,15 @@ export function App() {
       );
       setTelemetryEntries((prev) => [failedTelemetry, ...prev]);
     } finally {
+      if(cloudBound) setCloudAttemptStatus(readCloudAttemptStatus());
       setIsRunning(false);
     }
   };
 
   const handleKeepProposal = (proposalId: string) => {
     const target = proposals.find((p) => p.id === proposalId);
-    if (!target || target.patchOps.length === 0) return;
+    if (!target || target.status !== 'pending' || target.patchOps.length === 0 ||
+        target.telemetry.sourceEvidence !== 'sdk_terminal_response' || !target.responseText.trim()) return;
 
     persistTripUpdate((prev) => applyProposalOps(prev, target.patchOps));
     setProposals((prev) =>
@@ -294,8 +316,7 @@ export function App() {
         onSelectTrip={setActiveTripId}
         onResetTrips={() => {
           const fresh = PRESET_TRIPS.map(cloneTrip);
-          setTrips(fresh);
-          saveLocalTrips(fresh);
+          commitLocalTrips(fresh);
           setActiveTripId(fresh[0].id);
         }}
         isOnline={isOnline}
@@ -305,17 +326,20 @@ export function App() {
         inferenceMode={inferenceMode}
         onChangeInferenceMode={setInferenceMode}
         appCheckMode={firebaseHandle?.appCheckMode ?? 'unconfigured'}
-        isLiveProject={firebaseHandle?.setup.isLiveProject ?? false}
+        isLiveProject={cloudBound}
+        cloudAttemptStatus={cloudAttemptStatus}
         usingEmulator={Boolean(firebaseHandle?.setup.emulatorBaseUrl)}
         onOpenSetup={() => setSetupOpen(true)}
       />
 
       <main className="mx-auto grid max-w-[1440px] grid-cols-1 gap-5 px-4 py-5 sm:px-6 lg:grid-cols-12">
-        <div className="lg:col-span-6">
+        <div id="local-itinerary" tabIndex={-1} className="lg:col-span-6">
           <ItineraryPane
             trip={activeTrip}
             evaluation={evaluation}
-            syncStatus={syncStatus}
+            syncStatus="local_only"
+            localSaveStatus={localSaveStatus}
+            onRetryLocalSave={retryLocalSave}
             onChangeStartTime={(startTimeMin) =>
               persistTripUpdate((prev) => ({
                 ...prev,

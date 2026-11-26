@@ -107,6 +107,10 @@ export async function initializeOnDeviceModel(
   });
 }
 
+const NATIVE_PROMPT_BUDGET_MS = 30_000;
+// Do not start a second native task until the previous SDK stream actually settles.
+const nativeInFlight = new WeakSet<AI>();
+
 export async function runHybridPrompt(
   req: HybridExecutionRequest,
   onChunk: (accumulatedText: string) => void
@@ -119,10 +123,18 @@ export async function runHybridPrompt(
       ? InferenceMode.ONLY_ON_DEVICE
       : req.requestedMode;
 
+  const nativeOnly = effectiveMode === InferenceMode.ONLY_ON_DEVICE;
+  const nativeAbort = nativeOnly ? new AbortController() : undefined;
+  const signal = nativeAbort?.signal;
+  // Firebase 3.1.0 forwards promptOptions as-is. Chrome supports signal here,
+  // while this SDK's older Prompt Options interface declares responseConstraint.
+  const nativePromptOptions = signal ? { responseConstraint: undefined, signal } : undefined;
   const hybridParams: HybridParams = {
     mode: effectiveMode,
     onDeviceParams: {
+      ...(nativePromptOptions ? { promptOptions: nativePromptOptions } : {}),
       createOptions: {
+        ...(signal ? { signal } : {}),
         expectedInputs: hasImage
           ? [{ type: 'text' }, { type: 'image' }]
           : [{ type: 'text' }],
@@ -139,8 +151,6 @@ export async function runHybridPrompt(
     ? { timeout: REQ211_FETCH_TIMEOUT_MS }
     : req.emulatorBaseUrl ? { baseUrl: req.emulatorBaseUrl } : undefined;
 
-  const model = getGenerativeModel(req.ai, hybridParams, requestOptions);
-
   const parts: Array<string | Part> = [req.prompt];
   if (req.imageAttachment) {
     parts.push({
@@ -154,19 +164,27 @@ export async function runHybridPrompt(
 
   let ttftMs: number | null = null;
   let accumulated = '';
+  let blockedBeforeDispatch = false;
+  let sourceUnverified = false;
+  let terminalTextMissing = false;
+  let timedOut = false;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
 
-  try {
+  const consumeSdkTerminal = async () => {
     // Guard against @firebase/ai@3.1.0 falling back to cloud when globalThis.LanguageModel is absent
     // (chromeAdapterFactory returns undefined, bypassing ONLY_ON_DEVICE checks inside callHybrid).
     if (effectiveMode === InferenceMode.ONLY_ON_DEVICE) {
       const localStatus = await checkOnDeviceAvailability(hasImage);
       if (localStatus !== 'available') {
+        blockedBeforeDispatch = true;
         throw new Error(
           `Local Privacy Shield blocked cloud transmission (on-device model is "${localStatus}").`
         );
       }
     }
 
+    signal?.throwIfAborted();
+    const model = getGenerativeModel(req.ai, hybridParams, requestOptions);
     const streamResult = await model.generateContentStream(parts,
       req.competitionCloudSignal ? {signal: req.competitionCloudSignal} : undefined);
     // A stream failure also rejects the SDK response promise. Observe it now,
@@ -175,6 +193,7 @@ export async function runHybridPrompt(
     void responsePromise.catch(() => undefined);
 
     for await (const chunk of streamResult.stream) {
+      signal?.throwIfAborted();
       const piece = chunk.text();
       if (piece) {
         if (ttftMs === null) {
@@ -186,17 +205,59 @@ export async function runHybridPrompt(
     }
 
     const finalResponse = await responsePromise;
-    const finalText = finalResponse.text() || accumulated;
-    const actualSource = finalResponse.inferenceSource ?? InferenceSource.IN_CLOUD;
+    signal?.throwIfAborted();
+    // Requested mode, network status and streamed text are not source evidence.
+    const source = finalResponse.inferenceSource;
+    if ((source !== InferenceSource.ON_DEVICE && source !== InferenceSource.IN_CLOUD) ||
+        (effectiveMode === InferenceMode.ONLY_ON_DEVICE && source !== InferenceSource.ON_DEVICE) ||
+        (effectiveMode === InferenceMode.ONLY_IN_CLOUD && source !== InferenceSource.IN_CLOUD)) {
+      sourceUnverified = true;
+      throw new Error('REQ211_INFERENCE_SOURCE_UNVERIFIED');
+    }
+    const text = finalResponse.text();
+    if (typeof text !== 'string' || !text.trim()) {
+      terminalTextMissing = true;
+      throw new Error('REQ211_TERMINAL_TEXT_MISSING');
+    }
+    // Do not promote a partial stream into a completed result.
+    const actualSource: InferenceSource | 'local_emulator' = source === InferenceSource.IN_CLOUD && req.emulatorBaseUrl && !req.competitionCloudSignal
+      ? 'local_emulator' : source;
+    return { text, actualSource };
+  };
+
+  try {
+    if (nativeOnly && nativeInFlight.has(req.ai)) {
+      throw new Error('REQ211_NATIVE_DRAINING');
+    }
+    if (nativeOnly) nativeInFlight.add(req.ai);
+    const task = consumeSdkTerminal();
+    if (nativeAbort) {
+      const release = () => {
+        nativeInFlight.delete(req.ai);
+        if (!nativeAbort.signal.aborted) nativeAbort.abort();
+      };
+      // Detach for UI timeout, but keep the physical device slot until settled.
+      void task.then(release, release);
+    }
+    const timeout = nativeAbort ? new Promise<never>((_resolve, reject) => {
+      deadline = setTimeout(() => {
+        timedOut = true;
+        const error = new Error('REQ211_NATIVE_TIME_LIMIT');
+        nativeAbort.abort(error);
+        reject(error);
+      }, NATIVE_PROMPT_BUDGET_MS);
+    }) : undefined;
+    const { text, actualSource } = timeout ? await Promise.race([task, timeout]) : await task;
     const totalMs = Math.max(1, Math.round(performance.now() - startedAt));
 
     return {
-      text: finalText,
+      text,
       telemetry: {
         id: `tel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         taskKind: req.taskKind,
         requestedMode: effectiveMode,
         actualSource,
+        sourceEvidence: 'sdk_terminal_response',
         modelLabel:
           actualSource === InferenceSource.ON_DEVICE
             ? 'Gemini Nano (Chrome Built-in AI)'
@@ -207,33 +268,34 @@ export async function runHybridPrompt(
         appCheckMode: req.appCheckMode,
         ttftMs: ttftMs ?? totalMs,
         totalMs,
-        estimatedCloudCostUsd: actualSource === InferenceSource.ON_DEVICE || req.competitionCloudSignal ? 0 : 0.0002,
+        estimatedCloudCostUsd: actualSource === InferenceSource.ON_DEVICE || actualSource === 'local_emulator' ? 0 : null,
         inputModalities: hasImage ? ['text', 'image'] : ['text'],
         timestamp: Date.now(),
       },
     };
   } catch (err) {
     const totalMs = Math.max(1, Math.round(performance.now() - startedAt));
-    const isPrivacyBlocked = effectiveMode === InferenceMode.ONLY_ON_DEVICE;
     const upstreamStatus = req.competitionCloudSignal
       ? (err as {customErrorData?: {status?: number}} | null)?.customErrorData?.status : undefined;
     const safeCloudMessage = upstreamStatus === 429 ? 'REQ211_CLOUD_QUOTA_STOP'
       : upstreamStatus === 403 ? 'REQ211_CLOUD_PERMISSION_STOP' : 'REQ211_CLOUD_STOP';
-    const message = req.competitionCloudSignal ? safeCloudMessage : err instanceof Error ? err.message : String(err);
+    const message = timedOut ? 'REQ211_NATIVE_TIME_LIMIT' :
+      sourceUnverified ? 'REQ211_INFERENCE_SOURCE_UNVERIFIED' :
+      terminalTextMissing ? 'REQ211_TERMINAL_TEXT_MISSING' :
+      req.competitionCloudSignal ? safeCloudMessage : err instanceof Error ? err.message : String(err);
 
     const telemetry: InferenceTelemetry = {
       id: `tel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       taskKind: req.taskKind,
       requestedMode: effectiveMode,
-      actualSource: isPrivacyBlocked ? 'blocked_offline_privacy' : 'error',
-      modelLabel: isPrivacyBlocked
-        ? 'Blocked locally (0 bytes sent to cloud)'
-        : req.cloudModel,
+      actualSource: sourceUnverified ? 'source_unverified' : blockedBeforeDispatch ? 'blocked_offline_privacy' : 'error',
+      modelLabel: sourceUnverified ? 'Inference source not verified' :
+        blockedBeforeDispatch ? 'Blocked before model dispatch' : 'No completed model result',
       onlineAtStart,
       appCheckMode: req.appCheckMode,
       ttftMs: null,
       totalMs,
-      estimatedCloudCostUsd: 0,
+      estimatedCloudCostUsd: blockedBeforeDispatch ? 0 : null,
       inputModalities: hasImage ? ['text', 'image'] : ['text'],
       timestamp: Date.now(),
     };
@@ -241,6 +303,8 @@ export async function runHybridPrompt(
     const enriched = new Error(message) as Error & { telemetry?: InferenceTelemetry };
     enriched.telemetry = telemetry;
     throw enriched;
+  } finally {
+    if (deadline !== undefined) clearTimeout(deadline);
   }
 }
 
@@ -269,7 +333,10 @@ export async function runCompetitionPrompt(
   // In the contest build, a local preference is not explicit cloud selection.
   // Any local failure is final for this invocation, even before the first chunk.
   if (requestedMode === InferenceMode.PREFER_ON_DEVICE) return local();
-  if (requestedMode === InferenceMode.PREFER_IN_CLOUD && !handle.setup.isLiveProject) return local();
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw new Error('REQ211_CLOUD_OFFLINE_STOP');
+  }
+  if (!handle.setup.isLiveProject) throw new Error('REQ211_APP_CHECK_UNAVAILABLE');
   return handle.runApprovedCloud(prompt, (ai, signal) =>
     runHybridPrompt({...req, ai, requestedMode: InferenceMode.ONLY_IN_CLOUD, competitionCloudSignal: signal}, onChunk));
 }

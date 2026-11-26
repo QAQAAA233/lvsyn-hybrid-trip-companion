@@ -28,6 +28,8 @@ interface ItineraryPaneProps {
   trip: Trip;
   evaluation: ScheduleEvaluation;
   syncStatus: 'local_only' | 'firestore_synced' | 'firestore_offline_queued';
+  localSaveStatus?: 'ready'|'saved'|'volatile';
+  onRetryLocalSave?: () => void;
   onChangeStartTime: (startTimeMin: number) => void;
   onChangeDayOfWeek: (day: DayOfWeek) => void;
   onMoveStop: (stopId: string, direction: -1 | 1) => void;
@@ -42,6 +44,8 @@ export function ItineraryPane({
   trip,
   evaluation,
   syncStatus,
+  localSaveStatus='ready',
+  onRetryLocalSave,
   onChangeStartTime,
   onChangeDayOfWeek,
   onMoveStop,
@@ -85,6 +89,23 @@ export function ItineraryPane({
 
   return (
     <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-4 shadow-xs sm:p-5">
+      <div className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${
+        localSaveStatus==='volatile'?'border-amber-300 bg-amber-50 text-amber-950':
+          'border-stone-200 bg-stone-50 text-stone-800'}`}>
+        <p className="m-0" role="status" aria-atomic="true" data-testid="itinerary-local-save">
+          {localSaveStatus==='volatile'
+            ? 'Local save was not confirmed. Keep this tab open to retain your edits, then retry local save.'
+            : localSaveStatus==='saved'
+              ? 'Saved on this browser. Nothing was sent to the cloud.'
+              : 'Editing does not require a network connection.'}
+        </p>
+        {localSaveStatus==='volatile' && onRetryLocalSave && (
+          <button type="button" onClick={onRetryLocalSave}
+            className="inline-flex min-h-11 items-center rounded-md border border-amber-500 bg-white px-3 font-semibold text-amber-950 focus-visible:outline-2">
+            Retry local save
+          </button>
+        )}
+      </div>
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-stone-100 pb-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-medium text-stone-500">
@@ -98,7 +119,7 @@ export function ItineraryPane({
                 ? 'Firestore Synced'
                 : syncStatus === 'firestore_offline_queued'
                   ? 'Firestore Offline Cache'
-                  : 'Local Offline Storage'}
+                  : 'Local itinerary'}
             </span>
           </div>
           <h2 className="mt-1 text-lg font-bold text-stone-900">{trip.title}</h2>

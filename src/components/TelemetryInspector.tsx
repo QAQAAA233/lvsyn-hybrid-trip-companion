@@ -7,8 +7,12 @@ interface TelemetryInspectorProps {
 }
 
 export function TelemetryInspector({ entries }: TelemetryInspectorProps) {
-  const onDeviceRuns = entries.filter((e) => e.actualSource === InferenceSource.ON_DEVICE);
-  const inCloudRuns = entries.filter((e) => e.actualSource === InferenceSource.IN_CLOUD);
+  const wasConfirmed = (entry: InferenceTelemetry) => entry.sourceEvidence === 'sdk_terminal_response';
+  const onDeviceRuns = entries.filter((e) => wasConfirmed(e) && e.actualSource === InferenceSource.ON_DEVICE);
+  const inCloudRuns = entries.filter((e) => wasConfirmed(e) && e.actualSource === InferenceSource.IN_CLOUD);
+  const sourceForDisplay = (e: InferenceTelemetry) =>
+    !wasConfirmed(e) && (e.actualSource === InferenceSource.ON_DEVICE ||
+      e.actualSource === InferenceSource.IN_CLOUD || e.actualSource === 'local_emulator') ? 'source_unverified' : e.actualSource;
 
   const avgLocalMs =
     onDeviceRuns.length > 0
@@ -61,7 +65,7 @@ export function TelemetryInspector({ entries }: TelemetryInspectorProps) {
           </p>
         </div>
         <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-2.5">
-          <p className="text-[11px] font-medium text-blue-800">Cloud Fallback Runs</p>
+          <p className="text-[11px] font-medium text-blue-800">Confirmed Cloud Runs</p>
           <p className="mt-0.5 text-lg font-bold tabular-nums text-blue-950">
             {inCloudRuns.length}
           </p>
@@ -73,9 +77,9 @@ export function TelemetryInspector({ entries }: TelemetryInspectorProps) {
           </p>
         </div>
         <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
-          <p className="text-[11px] font-medium text-stone-600">Cloud Calls Saved</p>
+          <p className="text-[11px] font-medium text-stone-600">Source Unverified</p>
           <p className="mt-0.5 text-lg font-bold tabular-nums text-stone-900">
-            {onDeviceRuns.length} ($0)
+            {entries.filter((e) => sourceForDisplay(e) === 'source_unverified').length}
           </p>
         </div>
       </div>
@@ -101,14 +105,14 @@ export function TelemetryInspector({ entries }: TelemetryInspectorProps) {
                   <td className="py-1.5 pr-3">
                     <span
                       className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        e.actualSource === InferenceSource.ON_DEVICE
+                        sourceForDisplay(e) === InferenceSource.ON_DEVICE
                           ? 'bg-emerald-100 text-emerald-800'
-                          : e.actualSource === InferenceSource.IN_CLOUD
+                          : sourceForDisplay(e) === InferenceSource.IN_CLOUD
                             ? 'bg-blue-100 text-blue-800'
                             : 'bg-amber-100 text-amber-800'
                       }`}
                     >
-                      {e.actualSource}
+                      {sourceForDisplay(e)}
                     </span>
                   </td>
                   <td className="py-1.5 pr-3 text-stone-600">
