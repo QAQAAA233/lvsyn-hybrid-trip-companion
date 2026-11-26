@@ -1,4 +1,5 @@
-const CACHE_NAME = 'lvsyn-hybrid-shell-v1';
+const CACHE_NAME = 'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71';
+const SUPERSEDED_CONTEST_CACHES = new Set(['lvsyn-hybrid-shell-v1', 'lvsyn-hybrid-shell-req211-v2']);
 const CORE_ASSETS = [
   '/',
   '/index.html',
@@ -17,7 +18,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => SUPERSEDED_CONTEST_CACHES.has(k)).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -30,7 +31,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(req).then((cached) => {
+    caches.open(CACHE_NAME).then((cache) => cache.match(req)).then((cached) => {
       if (cached) return cached;
       return fetch(req).then((response) => {
         if (response && response.ok && (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/samples/') || url.pathname === '/')) {
@@ -40,7 +41,7 @@ self.addEventListener('fetch', (event) => {
         return response;
       }).catch(() => {
         if (req.mode === 'navigate') {
-          return caches.match('/index.html');
+          return caches.open(CACHE_NAME).then((cache) => cache.match('/index.html'));
         }
         return new Response('Offline', { status: 503, statusText: 'Offline' });
       });

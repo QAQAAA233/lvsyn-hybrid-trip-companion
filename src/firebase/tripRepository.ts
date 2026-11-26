@@ -1,4 +1,3 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { cloneTrip, PRESET_TRIPS } from '../domain/presets';
 import type { Trip } from '../domain/trip';
 import type { FirebaseRuntimeHandle } from './init';
@@ -27,48 +26,18 @@ export function saveLocalTrips(trips: Trip[]): void {
   localStorage.setItem(LOCAL_TRIPS_KEY, JSON.stringify(trips));
 }
 
+// Competition review policy: a Firebase AI handle is not consent to upload trip drafts.
+// The Spark demo retains trip edits locally even if AI Logic is live or connectivity changes.
 export async function syncTripToFirestoreIfEnabled(
-  handle: FirebaseRuntimeHandle | null,
-  trip: Trip
+  _handle: FirebaseRuntimeHandle | null,
+  _trip: Trip
 ): Promise<'local_only' | 'firestore_synced' | 'firestore_offline_queued'> {
-  if (!handle?.firestore || !handle.setup.isLiveProject) {
-    return 'local_only';
-  }
-  const uid = handle.auth?.currentUser?.uid || 'guest-demo';
-  const ref = doc(handle.firestore, 'users', uid, 'trips', trip.id);
-  try {
-    await setDoc(
-      ref,
-      {
-        id: trip.id,
-        title: trip.title,
-        city: trip.city,
-        dayOfWeek: trip.dayOfWeek,
-        startTimeMin: trip.startTimeMin,
-        returnDeadlineMin: trip.returnDeadlineMin,
-        stops: trip.stops,
-        updatedAt: trip.updatedAt,
-      },
-      { merge: true }
-    );
-    return typeof navigator !== 'undefined' && !navigator.onLine
-      ? 'firestore_offline_queued'
-      : 'firestore_synced';
-  } catch {
-    return 'local_only';
-  }
+  return 'local_only';
 }
 
 export async function fetchTripFromFirestoreIfEnabled(
-  handle: FirebaseRuntimeHandle | null,
-  tripId: string
+  _handle: FirebaseRuntimeHandle | null,
+  _tripId: string
 ): Promise<Partial<Trip> | null> {
-  if (!handle?.firestore || !handle.setup.isLiveProject) return null;
-  const uid = handle.auth?.currentUser?.uid || 'guest-demo';
-  try {
-    const snap = await getDoc(doc(handle.firestore, 'users', uid, 'trips', tripId));
-    return snap.exists() ? (snap.data() as Partial<Trip>) : null;
-  } catch {
-    return null;
-  }
+  return null;
 }

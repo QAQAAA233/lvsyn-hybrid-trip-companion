@@ -1,120 +1,55 @@
 import type { FirebaseOptions } from 'firebase/app';
 
-export interface RuntimeFirebaseSetup {
-  config: FirebaseOptions;
-  isLiveProject: boolean;
-  emulatorBaseUrl: string;
-  appCheckDebugToken: string;
-  recaptchaSiteKey: string;
-  cloudModel: string;
-}
-
-const STORAGE_KEY = 'lvsyn_hybrid_firebase_config_v1';
-
-const LOCAL_PLACEHOLDER_CONFIG: FirebaseOptions = {
+export const REQ211_MODEL = 'gemini-3.5-flash-lite';
+export const CLOUD_APP_NAME = 'req211-hybrid-trip-spark';
+export const LOCAL_APP_NAME = 'req211-hybrid-trip-local';
+export const LOCAL_OPTIONS: FirebaseOptions = Object.freeze({
   apiKey: 'local-dev-only-not-a-secret',
-  authDomain: 'local-hybrid-demo.firebaseapp.com',
   projectId: 'local-hybrid-demo',
   appId: '1:000000000000:web:localdemo',
-};
+});
 
-export interface StoredFirebaseOverride {
-  apiKey?: string;
-  authDomain?: string;
-  projectId?: string;
-  storageBucket?: string;
-  messagingSenderId?: string;
-  appId?: string;
-  appCheckDebugToken?: string;
-  recaptchaSiteKey?: string;
-  cloudModel?: string;
-  emulatorBaseUrl?: string;
+export interface RuntimeFirebaseSetup {
+  isLiveProject: boolean;
+  emulatorBaseUrl: '';
+}
+export interface CloudBinding {
+  projectId: string;
+  appId: string;
+  apiKey: string;
+  enterpriseSiteKey: string;
 }
 
-export function loadStoredFirebaseOverride(): StoredFirebaseOverride | null {
-  if (typeof localStorage === 'undefined') return null;
+// Owner only sets these at build time after checking the exact same unlinked Spark project
+// and enforced App Check. A receipt hash is a reference, not a Console authority assertion.
+export function readCompetitionBinding(env: Record<string, unknown> = {}): CloudBinding | null {
+  const projectId = env.VITE_FIREBASE_PROJECT_ID;
+  const appId = env.VITE_FIREBASE_APP_ID;
+  const apiKey = env.VITE_FIREBASE_API_KEY;
+  const enterpriseSiteKey = env.VITE_REQ211_RECAPTCHA_ENTERPRISE_SITE_KEY;
+  const receipt = env.VITE_REQ211_OWNER_RECEIPT_SHA256;
+  const fingerprint = env.VITE_REQ211_APPROVED_BINDING_SHA256;
+  if (typeof projectId !== 'string' || !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(projectId) ||
+      projectId === LOCAL_OPTIONS.projectId || projectId !== env.VITE_REQ211_APPROVED_PROJECT_ID ||
+      typeof appId !== 'string' || !/^1:[1-9][0-9]{5,19}:web:[0-9a-f]{10,64}$/.test(appId) ||
+      appId !== env.VITE_REQ211_APPROVED_WEB_APP_ID ||
+      typeof apiKey !== 'string' || !/^[A-Za-z0-9_-]{20,120}$/.test(apiKey) ||
+      typeof enterpriseSiteKey !== 'string' || !/^[A-Za-z0-9_-]{20,120}$/.test(enterpriseSiteKey) ||
+      typeof receipt !== 'string' || !/^[0-9a-f]{64}$/.test(receipt) ||
+      typeof fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(fingerprint) ||
+      env.VITE_APPCHECK_DEBUG_TOKEN || env.VITE_AI_EMULATOR_URL) return null;
+  return Object.freeze({projectId, appId, apiKey, enterpriseSiteKey});
+}
+
+export async function confirmCompetitionBinding(env: Record<string, unknown>): Promise<CloudBinding | null> {
+  const binding = readCompetitionBinding(env);
+  if (!binding || !globalThis.crypto?.subtle) return null;
+  const encoded = new TextEncoder().encode(JSON.stringify([
+    binding.projectId, binding.appId, binding.apiKey, binding.enterpriseSiteKey,
+  ]));
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as StoredFirebaseOverride) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveStoredFirebaseOverride(override: StoredFirebaseOverride | null): void {
-  if (typeof localStorage === 'undefined') return;
-  if (!override) {
-    localStorage.removeItem(STORAGE_KEY);
-    return;
-  }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(override));
-}
-
-export function getRuntimeFirebaseConfig(): RuntimeFirebaseSetup {
-  const stored = loadStoredFirebaseOverride();
-
-  const envApiKey = (import.meta.env?.VITE_FIREBASE_API_KEY as string | undefined)?.trim() || '';
-  const envProjectId = (import.meta.env?.VITE_FIREBASE_PROJECT_ID as string | undefined)?.trim() || '';
-  const envAppId = (import.meta.env?.VITE_FIREBASE_APP_ID as string | undefined)?.trim() || '';
-
-  const apiKey = (stored?.apiKey ?? envApiKey).trim();
-  const projectId = (stored?.projectId ?? envProjectId).trim();
-  const appId = (stored?.appId ?? envAppId).trim();
-
-  const hasExplicitProject = Boolean(
-    apiKey &&
-      projectId &&
-      appId &&
-      apiKey !== LOCAL_PLACEHOLDER_CONFIG.apiKey &&
-      projectId !== LOCAL_PLACEHOLDER_CONFIG.projectId
-  );
-
-  const config: FirebaseOptions = hasExplicitProject
-    ? {
-        apiKey,
-        authDomain:
-          (stored?.authDomain ?? (import.meta.env?.VITE_FIREBASE_AUTH_DOMAIN as string | undefined) ?? `${projectId}.firebaseapp.com`).trim(),
-        projectId,
-        storageBucket:
-          (stored?.storageBucket ?? (import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET as string | undefined) ?? '').trim() || undefined,
-        messagingSenderId:
-          (stored?.messagingSenderId ?? (import.meta.env?.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined) ?? '').trim() || undefined,
-        appId,
-      }
-    : LOCAL_PLACEHOLDER_CONFIG;
-
-  const emulatorBaseUrl = (
-    stored?.emulatorBaseUrl ??
-    (import.meta.env?.VITE_AI_EMULATOR_URL as string | undefined) ??
-    ''
-  ).trim();
-
-  const appCheckDebugToken = (
-    stored?.appCheckDebugToken ??
-    (import.meta.env?.VITE_APPCHECK_DEBUG_TOKEN as string | undefined) ??
-    ''
-  ).trim();
-
-  const recaptchaSiteKey = (
-    stored?.recaptchaSiteKey ??
-    (import.meta.env?.VITE_APPCHECK_RECAPTCHA_SITE_KEY as string | undefined) ??
-    ''
-  ).trim();
-
-  const cloudModel = (
-    stored?.cloudModel ??
-    (import.meta.env?.VITE_CLOUD_MODEL as string | undefined) ??
-    'gemini-3.5-flash-lite'
-  ).trim();
-
-  return {
-    config,
-    isLiveProject: hasExplicitProject,
-    emulatorBaseUrl,
-    appCheckDebugToken,
-    recaptchaSiteKey,
-    cloudModel,
-  };
+    const checked = await globalThis.crypto.subtle.digest('SHA-256', encoded);
+    const hex = Array.from(new Uint8Array(checked), b => b.toString(16).padStart(2, '0')).join('');
+    return hex === env.VITE_REQ211_APPROVED_BINDING_SHA256 ? binding : null;
+  } catch { return null; }
 }

@@ -66,12 +66,13 @@ export function HeaderBar({
       };
     }
     return {
-      label: 'Nano Unavailable → Cloud Fallback',
+      label: isLiveProject ? 'Nano Unavailable · gated cloud fallback' : 'Nano Unavailable · cloud locked',
       className: 'bg-blue-50 text-blue-800 border-blue-200',
     };
   })();
 
   const appCheckLabel = (() => {
+    if (appCheckMode === 'recaptcha_enterprise') return 'App Check: Enterprise configured (per-request check)';
     if (appCheckMode === 'recaptcha_v3') return 'App Check: reCAPTCHA v3';
     if (appCheckMode === 'debug_token') return 'App Check: Debug Token';
     if (appCheckMode === 'local_emulator_provider') return 'App Check: Emulator Token';
@@ -95,7 +96,7 @@ export function HeaderBar({
               </span>
             </div>
             <p className="text-xs text-stone-500">
-              On-device Chrome Gemini Nano + automatic Cloud Gemini fallback + deterministic schedule verification
+              On-device Chrome Gemini Nano + gated cloud text fallback + deterministic schedule verification
             </p>
           </div>
         </div>

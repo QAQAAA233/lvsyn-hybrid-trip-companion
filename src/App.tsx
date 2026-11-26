@@ -3,7 +3,7 @@ import { InferenceMode } from 'firebase/ai';
 import {
   checkOnDeviceAvailability,
   initializeOnDeviceModel,
-  runHybridPrompt,
+  runCompetitionPrompt,
   type LocalModelAvailability,
 } from './ai/hybridInferenceService';
 import {
@@ -68,8 +68,8 @@ export function App() {
 
   const evaluation = useMemo(() => evaluateTripSchedule(activeTrip), [activeTrip]);
 
-  const bootstrapSdk = useCallback(async (forceReinit = false) => {
-    const handle = await initializeFirebaseServices(forceReinit);
+  const bootstrapSdk = useCallback(async () => {
+    const handle = await initializeFirebaseServices();
     setFirebaseHandle(handle);
     setInferenceMode(handle.remotePolicy.defaultInferenceMode);
     const avail = await checkOnDeviceAvailability(false);
@@ -77,7 +77,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void bootstrapSdk(false);
+    void bootstrapSdk();
   }, [bootstrapSdk]);
 
   useEffect(() => {
@@ -190,14 +190,11 @@ export function App() {
     setProposals((prev) => [placeholder, ...prev]);
 
     try {
-      const result = await runHybridPrompt(
+      const result = await runCompetitionPrompt(
+        firebaseHandle,
         {
-          ai: firebaseHandle.ai,
           taskKind,
           requestedMode,
-          cloudModel: firebaseHandle.remotePolicy.cloudFallbackModel,
-          emulatorBaseUrl: firebaseHandle.setup.emulatorBaseUrl || undefined,
-          appCheckMode: firebaseHandle.appCheckMode,
           prompt: fullPrompt,
           imageAttachment: imageAttachment
             ? {
@@ -398,7 +395,7 @@ export function App() {
       <FirebaseConfigModal
         open={setupOpen}
         onClose={() => setSetupOpen(false)}
-        onSaved={() => bootstrapSdk(true)}
+        cloudConfigured={firebaseHandle?.setup.isLiveProject ?? false}
       />
     </div>
   );

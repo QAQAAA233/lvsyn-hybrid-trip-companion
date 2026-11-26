@@ -5,6 +5,7 @@ import type { Trip } from './trip';
 export type TaskKind = 'concierge' | 'privacy_vault' | 'sign_vision' | 'schedule_optimize';
 
 export type AppCheckMode =
+  | 'recaptcha_enterprise'
   | 'recaptcha_v3'
   | 'debug_token'
   | 'local_emulator_provider'

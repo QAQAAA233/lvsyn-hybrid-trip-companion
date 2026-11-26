@@ -8,6 +8,9 @@ import {
   type RequestOptions,
 } from 'firebase/ai';
 import type { AppCheckMode, InferenceTelemetry, TaskKind } from '../domain/proposal';
+import type { FirebaseRuntimeHandle } from '../firebase/init';
+import { REQ211_MODEL } from '../firebase/config';
+import { REQ211_FETCH_TIMEOUT_MS } from '../firebase/req211Egress';
 
 export type LocalModelAvailability =
   | 'available'
@@ -32,6 +35,7 @@ export interface HybridExecutionRequest {
     mimeType: 'image/png' | 'image/jpeg';
   };
   systemInstruction?: string;
+  competitionCloudSignal?: AbortSignal;
 }
 
 export interface HybridExecutionResult {
@@ -86,7 +90,7 @@ export async function initializeOnDeviceModel(
   onProgress: (percent: number) => void
 ): Promise<void> {
   const model = getGenerativeModel(ai, {
-    mode: InferenceMode.PREFER_ON_DEVICE,
+    mode: InferenceMode.ONLY_ON_DEVICE,
     onDeviceParams: {
       createOptions: {
         expectedInputs: [{ type: 'text' }],
@@ -131,9 +135,9 @@ export async function runHybridPrompt(
     },
   };
 
-  const requestOptions: RequestOptions | undefined = req.emulatorBaseUrl
-    ? { baseUrl: req.emulatorBaseUrl }
-    : undefined;
+  const requestOptions: RequestOptions | undefined = req.competitionCloudSignal
+    ? { timeout: REQ211_FETCH_TIMEOUT_MS }
+    : req.emulatorBaseUrl ? { baseUrl: req.emulatorBaseUrl } : undefined;
 
   const model = getGenerativeModel(req.ai, hybridParams, requestOptions);
 
@@ -163,7 +167,12 @@ export async function runHybridPrompt(
       }
     }
 
-    const streamResult = await model.generateContentStream(parts);
+    const streamResult = await model.generateContentStream(parts,
+      req.competitionCloudSignal ? {signal: req.competitionCloudSignal} : undefined);
+    // A stream failure also rejects the SDK response promise. Observe it now,
+    // then await the original result below so its error remains the caller's.
+    const responsePromise = streamResult.response;
+    void responsePromise.catch(() => undefined);
 
     for await (const chunk of streamResult.stream) {
       const piece = chunk.text();
@@ -176,7 +185,7 @@ export async function runHybridPrompt(
       }
     }
 
-    const finalResponse = await streamResult.response;
+    const finalResponse = await responsePromise;
     const finalText = finalResponse.text() || accumulated;
     const actualSource = finalResponse.inferenceSource ?? InferenceSource.IN_CLOUD;
     const totalMs = Math.max(1, Math.round(performance.now() - startedAt));
@@ -198,7 +207,7 @@ export async function runHybridPrompt(
         appCheckMode: req.appCheckMode,
         ttftMs: ttftMs ?? totalMs,
         totalMs,
-        estimatedCloudCostUsd: actualSource === InferenceSource.ON_DEVICE ? 0 : 0.0002,
+        estimatedCloudCostUsd: actualSource === InferenceSource.ON_DEVICE || req.competitionCloudSignal ? 0 : 0.0002,
         inputModalities: hasImage ? ['text', 'image'] : ['text'],
         timestamp: Date.now(),
       },
@@ -206,7 +215,11 @@ export async function runHybridPrompt(
   } catch (err) {
     const totalMs = Math.max(1, Math.round(performance.now() - startedAt));
     const isPrivacyBlocked = effectiveMode === InferenceMode.ONLY_ON_DEVICE;
-    const message = err instanceof Error ? err.message : String(err);
+    const upstreamStatus = req.competitionCloudSignal
+      ? (err as {customErrorData?: {status?: number}} | null)?.customErrorData?.status : undefined;
+    const safeCloudMessage = upstreamStatus === 429 ? 'REQ211_CLOUD_QUOTA_STOP'
+      : upstreamStatus === 403 ? 'REQ211_CLOUD_PERMISSION_STOP' : 'REQ211_CLOUD_STOP';
+    const message = req.competitionCloudSignal ? safeCloudMessage : err instanceof Error ? err.message : String(err);
 
     const telemetry: InferenceTelemetry = {
       id: `tel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -229,4 +242,34 @@ export async function runHybridPrompt(
     enriched.telemetry = telemetry;
     throw enriched;
   }
+}
+
+// The React application only calls this route. Legacy runHybridPrompt stays testable for
+// the original emulator suite, but in a browser build its bare SDK egress is denied.
+type CompetitionPrompt = Pick<HybridExecutionRequest,
+  'taskKind' | 'requestedMode' | 'prompt' | 'imageAttachment'>;
+
+export async function runCompetitionPrompt(
+  handle: FirebaseRuntimeHandle, request: CompetitionPrompt,
+  onChunk: (accumulatedText: string) => void,
+): Promise<HybridExecutionResult> {
+  const {taskKind, requestedMode, prompt, imageAttachment} = request;
+  const req = {taskKind, prompt, cloudModel: REQ211_MODEL, appCheckMode: handle.appCheckMode};
+  const local = () => runHybridPrompt({...req, imageAttachment, ai: handle.ai,
+    requestedMode: InferenceMode.ONLY_ON_DEVICE}, onChunk);
+  if (taskKind === 'privacy_vault' || imageAttachment || requestedMode === InferenceMode.ONLY_ON_DEVICE) {
+    if (imageAttachment && requestedMode === InferenceMode.ONLY_IN_CLOUD && taskKind !== 'privacy_vault') {
+      throw new Error('REQ211_CLOUD_TEXT_ONLY');
+    }
+    return local();
+  }
+  if (![InferenceMode.PREFER_ON_DEVICE, InferenceMode.PREFER_IN_CLOUD, InferenceMode.ONLY_IN_CLOUD].includes(requestedMode)) {
+    throw new Error('REQ211_INFERENCE_MODE_INVALID');
+  }
+  // In the contest build, a local preference is not explicit cloud selection.
+  // Any local failure is final for this invocation, even before the first chunk.
+  if (requestedMode === InferenceMode.PREFER_ON_DEVICE) return local();
+  if (requestedMode === InferenceMode.PREFER_IN_CLOUD && !handle.setup.isLiveProject) return local();
+  return handle.runApprovedCloud(prompt, (ai, signal) =>
+    runHybridPrompt({...req, ai, requestedMode: InferenceMode.ONLY_IN_CLOUD, competitionCloudSignal: signal}, onChunk));
 }

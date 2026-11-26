@@ -1,196 +1,113 @@
-import { deleteApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
+import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import { getAI, GoogleAIBackend, InferenceMode, type AI } from 'firebase/ai';
 import {
-  CustomProvider,
-  initializeAppCheck,
-  ReCaptchaV3Provider,
-  type AppCheck,
+  getToken, initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck,
 } from 'firebase/app-check';
-import { getAuth, signInAnonymously, type Auth } from 'firebase/auth';
-import {
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-  type Firestore,
-} from 'firebase/firestore';
-import {
-  fetchAndActivate,
-  getBoolean,
-  getRemoteConfig,
-  getString,
-  type RemoteConfig,
-} from 'firebase/remote-config';
+import type { Auth } from 'firebase/auth';
+import type { Firestore } from 'firebase/firestore';
 import type { AppCheckMode } from '../domain/proposal';
-import { getRuntimeFirebaseConfig, type RuntimeFirebaseSetup } from './config';
+import {
+  CLOUD_APP_NAME, LOCAL_APP_NAME, LOCAL_OPTIONS, REQ211_MODEL, confirmCompetitionBinding,
+  type CloudBinding, type RuntimeFirebaseSetup,
+} from './config';
+import { withCompetitionPermit } from './req211Egress';
 
 export interface RemoteConfigPolicy {
   defaultInferenceMode: InferenceMode;
-  cloudFallbackModel: string;
-  privacyVaultStrictLocal: boolean;
-  source: 'remote_config' | 'defaults';
+  cloudFallbackModel: typeof REQ211_MODEL;
+  privacyVaultStrictLocal: true;
+  source: 'fixed_contest_policy';
 }
-
 export interface FirebaseRuntimeHandle {
   setup: RuntimeFirebaseSetup;
-  app: FirebaseApp;
   ai: AI;
-  appCheck: AppCheck | null;
   appCheckMode: AppCheckMode;
-  remoteConfig: RemoteConfig | null;
   remotePolicy: RemoteConfigPolicy;
   firestore: Firestore | null;
   auth: Auth | null;
+  runApprovedCloud<T>(prompt: string, run: (ai: AI, signal: AbortSignal) => Promise<T>): Promise<T>;
 }
 
-let cachedHandle: FirebaseRuntimeHandle | null = null;
-
-function parseInferenceMode(value: string): InferenceMode {
-  switch (value) {
-    case InferenceMode.ONLY_ON_DEVICE:
-      return InferenceMode.ONLY_ON_DEVICE;
-    case InferenceMode.ONLY_IN_CLOUD:
-      return InferenceMode.ONLY_IN_CLOUD;
-    case InferenceMode.PREFER_IN_CLOUD:
-      return InferenceMode.PREFER_IN_CLOUD;
-    default:
-      return InferenceMode.PREFER_ON_DEVICE;
-  }
+type AppCheckInitializer = (app: FirebaseApp, binding: CloudBinding) => AppCheck;
+function startEnterprise(app: FirebaseApp, binding: CloudBinding): AppCheck {
+  if (typeof window === 'undefined') throw new Error('REQ211_APP_CHECK_UNAVAILABLE');
+  return initializeAppCheck(app, {
+    provider: new ReCaptchaEnterpriseProvider(binding.enterpriseSiteKey),
+    isTokenAutoRefreshEnabled: false,
+  });
 }
 
-export async function initializeFirebaseServices(
-  forceReinit = false
+function debugEnabled(): boolean {
+  const g = globalThis as { FIREBASE_APPCHECK_DEBUG_TOKEN?: unknown };
+  return Boolean(g.FIREBASE_APPCHECK_DEBUG_TOKEN);
+}
+function matches(app: FirebaseApp, binding: CloudBinding): boolean {
+  const o = app.options;
+  return app.name === CLOUD_APP_NAME && o.projectId === binding.projectId &&
+    o.appId === binding.appId && o.apiKey === binding.apiKey;
+}
+
+function sameAppToken(appCheck: AppCheck): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('REQ211_APP_CHECK_UNAVAILABLE')), 8_000);
+    getToken(appCheck).then(({token}) => {
+      clearTimeout(timer);
+      resolve(token);
+    }, () => {
+      clearTimeout(timer);
+      reject(new Error('REQ211_APP_CHECK_UNAVAILABLE'));
+    });
+  });
+}
+
+let localOwned: FirebaseApp | undefined;
+export async function createCompetitionRuntime(
+  env: Record<string, unknown>,
+  appCheckInitializer: AppCheckInitializer = startEnterprise,
 ): Promise<FirebaseRuntimeHandle> {
-  if (cachedHandle && !forceReinit) {
-    return cachedHandle;
-  }
-
-  if (forceReinit) {
-    for (const existing of getApps()) {
-      await deleteApp(existing);
-    }
-    cachedHandle = null;
-  }
-
-  const setup = getRuntimeFirebaseConfig();
-  const app = getApps()[0] ?? initializeApp(setup.config);
-
-  let appCheck: AppCheck | null = null;
-  let appCheckMode: AppCheckMode = 'unconfigured';
-
-  if (typeof window !== 'undefined') {
-    if (setup.appCheckDebugToken) {
-      (self as unknown as Record<string, unknown>).FIREBASE_APPCHECK_DEBUG_TOKEN =
-        setup.appCheckDebugToken === 'true' ? true : setup.appCheckDebugToken;
-    }
-
-    if (setup.recaptchaSiteKey) {
-      appCheck = initializeAppCheck(app, {
-        provider: new ReCaptchaV3Provider(setup.recaptchaSiteKey),
-        isTokenAutoRefreshEnabled: true,
-      });
-      appCheckMode = setup.appCheckDebugToken ? 'debug_token' : 'recaptcha_v3';
-    } else if (setup.emulatorBaseUrl) {
-      appCheck = initializeAppCheck(app, {
-        provider: new CustomProvider({
-          getToken: async () => ({
-            token: 'local-dev-appcheck-debug-token',
-            expireTimeMillis: Date.now() + 60 * 60 * 1000,
-          }),
-        }),
-        isTokenAutoRefreshEnabled: false,
-      });
-      appCheckMode = 'local_emulator_provider';
-    } else if (setup.isLiveProject && setup.appCheckDebugToken) {
-      appCheck = initializeAppCheck(app, {
-        provider: new CustomProvider({
-          getToken: async () => ({
-            token:
-              setup.appCheckDebugToken === 'true'
-                ? 'debug-token-pending-console-registration'
-                : setup.appCheckDebugToken,
-            expireTimeMillis: Date.now() + 60 * 60 * 1000,
-          }),
-        }),
-        isTokenAutoRefreshEnabled: false,
-      });
-      appCheckMode = 'debug_token';
-    }
-  }
-
-  const ai = getAI(app, { backend: new GoogleAIBackend() });
-
-  let remoteConfig: RemoteConfig | null = null;
-  let remotePolicy: RemoteConfigPolicy = {
-    defaultInferenceMode: InferenceMode.PREFER_ON_DEVICE,
-    cloudFallbackModel: setup.cloudModel,
-    privacyVaultStrictLocal: true,
-    source: 'defaults',
-  };
-
-  if (typeof window !== 'undefined' && setup.isLiveProject) {
+  const existingLocal = getApps().find(app => app.name === LOCAL_APP_NAME);
+  if (existingLocal && existingLocal !== localOwned) throw new Error('REQ211_LOCAL_APP_COLLISION');
+  const localApp = existingLocal ?? (localOwned = initializeApp(LOCAL_OPTIONS, LOCAL_APP_NAME));
+  const ai = getAI(localApp, {backend: new GoogleAIBackend()});
+  const binding = await confirmCompetitionBinding(env);
+  let approved: {app: FirebaseApp; appCheck: AppCheck; ai: AI; binding: CloudBinding} | undefined;
+  if (binding && !debugEnabled() && !getApps().some(app => app.name === CLOUD_APP_NAME)) {
     try {
-      remoteConfig = getRemoteConfig(app);
-      remoteConfig.settings.minimumFetchIntervalMillis = 60_000;
-      remoteConfig.defaultConfig = {
-        default_inference_mode: InferenceMode.PREFER_ON_DEVICE,
-        cloud_fallback_model: setup.cloudModel,
-        privacy_vault_strict_local: true,
-      };
-      if (navigator.onLine) {
-        await fetchAndActivate(remoteConfig);
-        remotePolicy = {
-          defaultInferenceMode: parseInferenceMode(
-            getString(remoteConfig, 'default_inference_mode')
-          ),
-          cloudFallbackModel:
-            getString(remoteConfig, 'cloud_fallback_model') || setup.cloudModel,
-          privacyVaultStrictLocal: getBoolean(
-            remoteConfig,
-            'privacy_vault_strict_local'
-          ),
-          source: 'remote_config',
-        };
+      const app = initializeApp({projectId: binding.projectId, appId: binding.appId,
+        apiKey: binding.apiKey}, CLOUD_APP_NAME);
+      const appCheck = appCheckInitializer(app, binding);
+      if (matches(app, binding) && appCheck.app === app) {
+        approved = {app, appCheck, ai: getAI(app, {backend: new GoogleAIBackend()}), binding};
       }
     } catch {
-      // Offline or unconfigured Remote Config falls back safely to defaults
+      // No fallback to an existing/default app or a different provider.
     }
   }
-
-  let firestore: Firestore | null = null;
-  let auth: Auth | null = null;
-
-  if (typeof window !== 'undefined' && setup.isLiveProject) {
-    try {
-      firestore = initializeFirestore(app, {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
-        }),
-      });
-    } catch {
-      firestore = null;
-    }
-
-    try {
-      auth = getAuth(app);
-      if (navigator.onLine && !auth.currentUser) {
-        await signInAnonymously(auth);
-      }
-    } catch {
-      auth = null;
-    }
-  }
-
-  cachedHandle = {
-    setup,
-    app,
+  return {
+    setup: {isLiveProject: Boolean(approved), emulatorBaseUrl: ''},
     ai,
-    appCheck,
-    appCheckMode,
-    remoteConfig,
-    remotePolicy,
-    firestore,
-    auth,
+    appCheckMode: approved ? 'recaptcha_enterprise' : 'unconfigured',
+    remotePolicy: {defaultInferenceMode: InferenceMode.PREFER_ON_DEVICE,
+      cloudFallbackModel: REQ211_MODEL, privacyVaultStrictLocal: true, source: 'fixed_contest_policy'},
+    firestore: null, auth: null, // This contest copy keeps trip data local.
+    async runApprovedCloud(prompt, run) {
+      if (!approved || debugEnabled()) throw new Error('REQ211_APP_CHECK_UNAVAILABLE');
+      const {app, appCheck, ai: approvedAi, binding: locked} = approved;
+      if (!getApps().includes(app) || !matches(app, locked) || appCheck.app !== app ||
+        approvedAi.app !== app) throw new Error('REQ211_APP_IDENTITY_CHANGED');
+      const token = await sameAppToken(appCheck);
+      if (debugEnabled() || !getApps().includes(app))
+        throw new Error('REQ211_APP_IDENTITY_CHANGED');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 25_000);
+      try {
+        return await withCompetitionPermit(locked, token, prompt, () => run(approvedAi, controller.signal));
+      } finally { clearTimeout(timer); }
+    },
   };
+}
 
-  return cachedHandle;
+let cached: Promise<FirebaseRuntimeHandle> | undefined;
+export async function initializeFirebaseServices(): Promise<FirebaseRuntimeHandle> {
+  return cached ??= createCompetitionRuntime(import.meta.env ?? {});
 }
