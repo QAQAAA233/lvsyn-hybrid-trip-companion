@@ -43,17 +43,19 @@ const CONCIERGE_PROMPTS = [
   'Which stop is most likely to cause fatigue or tight timing today?',
 ];
 
+const BASE_URL = import.meta.env.BASE_URL || './';
+
 const SAMPLE_SIGNS = [
   {
     id: 'kyoto-sign',
     label: 'Kyoto Teahouse Notice (PNG)',
-    path: '/samples/kyoto-teahouse-sign.png',
+    path: `${BASE_URL}samples/kyoto-teahouse-sign.png`,
     prompt: 'Check opening hours, closed days, and step-free access from this venue sign.',
   },
   {
     id: 'alpine-sign',
     label: 'Alpine Cable Car Timetable (PNG)',
-    path: '/samples/alpine-cablecar-notice.png',
+    path: `${BASE_URL}samples/alpine-cablecar-notice.png`,
     prompt: 'Extract last descent time and weather/maintenance warnings from this station sign.',
   },
 ];

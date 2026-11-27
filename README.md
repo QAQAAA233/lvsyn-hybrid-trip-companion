@@ -1,141 +1,107 @@
 # LvSyn Hybrid Trip Companion
 
 > **Built for Google Firebase `#BuildHybridAI` 2026 (Web / Chrome PWA)**  
-> An offline-capable, on-device + cloud hybrid AI trip editing companion powered by **Firebase AI Logic** (`firebase/ai`), **Chrome Gemini Nano**, **Firebase App Check**, **Remote Config**, **Offline Firestore Cache**, and a **deterministic schedule verification engine**.
+> An offline-capable, on-device-first hybrid AI trip editing companion powered by **Firebase AI Logic** (`firebase/ai`), **Chrome Gemini Nano**, **Firebase App Check**, and a **deterministic schedule verification engine**.
+
+- **Hosted Live Try-It-Out (Static Web/Chrome PWA):** https://qaqaaa233.github.io/lvsyn-hybrid-trip-companion/
+- **License:** Apache License, Version 2.0 (`LICENSE`)
 
 ---
 
 ## Why Hybrid AI Matters for Real Travelers
 
-Travelers planning and adjusting multi-stop itineraries—especially families traveling with senior parents or commuters passing through rail tunnels—hit two failure modes:
+Travelers adjusting multi-stop itineraries—such as families visiting cities with senior parents or commuters riding through mountain rail tunnels—encounter two failure modes:
 
-1. **Connectivity Dead-Zones:** Mountain railways, subways, and roaming gaps break pure cloud AI chatbots right when travelers need accessibility notes, timing adjustments, or sign/menu interpretation.
-2. **Unverified LLM Hallucinations & Privacy Leaks:** Pure generative models frequently overlook Tuesday museum closures, steep stairways, or return-train cutoffs—and uploading private medical reminders or hotel door codes to remote clouds creates avoidable privacy risk.
+1. **Connectivity Dead-Zones & Sensitive Notes:** Subway tunnels and roaming gaps break cloud-only chat assistants right when travelers need timing adjustments, while private medical reminders, mobility notes, or accommodation door codes should never be silently uploaded to remote servers.
+2. **Unverified AI Schedule Suggestions:** Free-form model outputs can ignore Tuesday venue closures, steep walking burdens, or return-train deadlines unless every proposed edit is checked against deterministic constraints before saving.
 
-**LvSyn Hybrid Trip Companion** solves both by separating **semantic reasoning** (handled by Firebase AI Logic Hybrid Inference) from **deterministic schedule verification** (handled locally in TypeScript) and pairing them with an explicit **Keep / Discard** confirmation loop.
+**LvSyn Hybrid Trip Companion** separates **semantic inference** (routed through Firebase AI Logic `firebase/ai`) from **deterministic schedule verification** (computed locally in TypeScript) and keeps itinerary changes manual and reversible via explicit **Keep / Discard** confirmation scoped to the active trip.
 
 ---
 
-## Architecture
+## Architecture & Routing Policy
 
 ```mermaid
 flowchart LR
-    U[Traveler Action] --> Policy{Task Policy & Mode}
-    Policy -->|Concierge / Sign Vision / Optimizer<br/>PREFER_ON_DEVICE| SDK[Firebase AI Logic SDK<br/>firebase/ai getGenerativeModel]
-    Policy -->|Privacy Vault<br/>ONLY_ON_DEVICE| Guard[Pre-Flight Privacy Shield Guard]
-    Guard -->|Nano Available| SDK
-    Guard -->|Nano Unavailable| Shield[Blocked Locally<br/>0 Bytes Uploaded]
-    SDK --> Chrome{ChromeAdapter<br/>LanguageModel.availability}
-    Chrome -->|Available| Nano[Chrome Gemini Nano<br/>On-Device · 0 Cloud Calls · $0]
-    Chrome -->|Unavailable| Cloud[Cloud Gemini Fallback<br/>gemini-3.5-flash-lite + App Check]
-    Nano --> Telemetry[Live inferenceSource Telemetry]
-    Cloud --> Telemetry
+    U[Traveler Action] --> Policy{Task & Active Mode}
+    Policy -->|Privacy Vault / Image / PREFER_ON_DEVICE| Guard[Pre-Flight Local Availability Check]
+    Guard -->|LanguageModel available| SDK[Firebase AI Logic SDK<br/>firebase/ai getGenerativeModel]
+    SDK --> Nano[Chrome Gemini Nano<br/>ON_DEVICE · 0 Cloud Calls]
+    Guard -->|Nano unavailable| Stop[Stopped Locally · 0 Bytes Uploaded<br/>Manual Timeline Remains Editable]
+    Policy -->|Explicitly Selected Cloud Text Mode<br/>when live Spark binding present| Gate[Explicit Consent + Daily Attempt Cap<br/>+ ReCaptchaEnterprise App Check]
+    Gate --> Cloud[Cloud Text Gemini<br/>gemini-3.5-flash-lite via req211GuardedModelFetch]
     Nano --> Parser[patchOps Extractor]
     Cloud --> Parser
     Parser --> Engine[Deterministic Schedule Engine]
-    Engine --> Diff[Before/After Verification Diff]
+    Engine --> Diff[Before/After Conflict Diff]
     Diff --> Keep{Traveler Decision}
-    Keep -->|Keep| Timeline[(Trip Timeline + Firestore Offline Cache)]
+    Keep -->|Keep| Local[(Browser Local Storage<br/>+ Service Worker Offline Shell)]
     Keep -->|Discard| NoOp[Original Itinerary Preserved]
 ```
 
-### Verified Firebase SDK Entry Points
+### Firebase AI Logic & Safety Entry Points
 
-- **Firebase AI Logic Hybrid Inference:** [`src/ai/hybridInferenceService.ts`](src/ai/hybridInferenceService.ts) imports `getGenerativeModel`, `InferenceMode`, and `InferenceSource` from `firebase/ai`, invokes `model.initializeDeviceModel(...)`, streams via `model.generateContentStream(...)`, and reads `finalResponse.inferenceSource` (`"on_device"` vs `"in_cloud"`).
-- **Pre-Flight `ONLY_ON_DEVICE` Privacy Shield Guard:** During SDK contract testing against `@firebase/ai@3.1.0`, we observed that when `globalThis.LanguageModel` is absent, `chromeAdapterFactory` returns `undefined`, causing `callHybrid` in the SDK to bypass `InferenceMode.ONLY_ON_DEVICE` and invoke `inCloudCall()`. [`src/ai/hybridInferenceService.ts`](src/ai/hybridInferenceService.ts) closes this gap by verifying local `LanguageModel.availability` (with a 3.5s IPC timeout guard) before invoking `generateContentStream()` under `ONLY_ON_DEVICE`, guaranteeing **0 bytes** leave the device when local weights are unavailable.
-- **Firebase App Check, Remote Config & Offline Firestore:** [`src/firebase/init.ts`](src/firebase/init.ts) initializes `initializeAppCheck` (supporting reCAPTCHA v3, Firebase Console debug tokens via `FIREBASE_APPCHECK_DEBUG_TOKEN`, or a local dev custom provider), `getAI(app, { backend: new GoogleAIBackend() })`, `getRemoteConfig`, and `initializeFirestore` with `persistentLocalCache`.
-- **Deterministic Schedule Engine:** [`src/domain/scheduleEngine.ts`](src/domain/scheduleEngine.ts) computes exact stop arrival/departure minutes, waiting times, closed-day violations, return-train margins, and accessibility mismatches, verifying every AI-proposed `patchOps` preview before **Keep / Discard**.
-
----
-
-## Verified Real-Browser Screenshots
-
-All four screenshots below were captured directly from the built production bundle (`dist/`) running in isolated headless Google Chrome (`scripts/verify-e2e-and-capture.mjs`) against the local Firebase AI Logic SSE emulator (`scripts/local-cloud-emulator.mjs`):
-
-| Offline PWA Edit & Privacy Shield (`ONLY_ON_DEVICE` -> 0 bytes sent) | Multimodal Sign Vision Cloud Fallback (`IN-CLOUD` + App Check) |
-|---|---|
-| ![Offline PWA and Privacy Shield](docs/screenshots/01-offline-pwa-privacy-shield.png) | ![Multimodal Sign Vision Fallback](docs/screenshots/02-multimodal-sign-fallback.png) |
-
-| Schedule Optimizer Cloud Fallback & Conflict Diff (`2 -> 0` conflicts) | Keep Applied (`All 5 stops verified`) & Online Privacy Shield |
-|---|---|
-| ![Cloud Fallback Optimizer](docs/screenshots/03-cloud-fallback-optimizer.png) | ![Verified Timeline and Privacy Shield](docs/screenshots/04-verified-timeline-and-telemetry.png) |
+- **Hybrid Inference Service (`src/ai/hybridInferenceService.ts`):** Uses `getGenerativeModel`, `InferenceMode`, and `InferenceSource` from `firebase/ai` (`@firebase/ai@3.1.0`), calls `model.initializeDeviceModel(...)` and `model.generateContentStream(...)`, and accepts output only when `finalResponse.inferenceSource` and terminal text verify (`sdk_terminal_response`). Includes a pre-flight `ONLY_ON_DEVICE` availability check (with a 3.5s IPC timeout guard) so missing `globalThis.LanguageModel` never triggers an unexpected cloud fallback, and does not silently escalate `PREFER_ON_DEVICE` failures to the cloud.
+- **App Check & Spark Egress Controls (`src/firebase/config.ts`, `src/firebase/init.ts`, `src/firebase/req211Egress.ts`, `src/firebase/cloudAttemptBudget.ts`):** Cloud text mode stays locked in unbound open-source builds (`Mode · local only`). When built with a verified Spark-plan project binding and enforced `ReCaptchaEnterpriseProvider` App Check, explicit cloud requests verify the App Check token claims, enforce text-only egress on `gemini-3.5-flash-lite`, and cap daily browser attempts (`DAILY_CLOUD_ATTEMPT_LIMIT = 3` per UTC day) with no automatic retry loop.
+- **Deterministic Schedule Engine (`src/domain/scheduleEngine.ts` & `src/domain/proposal.ts`):** Computes exact arrival/departure times, waiting windows, closed-day violations, walking/step-free warnings, and return-train buffers offline, and scopes proposals to the active `tripId`.
 
 ---
 
-## Verification Summary (Observed Results)
+## Verified Build Screenshots (Unbound Local Build)
 
-- **Type-check & Build (`npm run build`):** `tsc --noEmit` (0 errors) and Vite production bundle built cleanly to `dist/`.
-- **Unit & Browser-ESM SDK Contract Tests (`npm test`):** `6/6` tests passing across `tests/scheduleEngine.test.ts` (2 tests) and `tests/hybridInference.test.ts` (4 tests against `@firebase/ai@3.1.0` browser ESM `ChromeAdapterImpl` + local HTTP SSE emulator, verifying `on_device` routing with 0 cloud calls, `in_cloud` fallback with `X-Firebase-AppCheck` and `x-goog-api-client: ... hybrid`, `ONLY_ON_DEVICE` leak prevention, and multimodal PNG `inlineData`).
-- **Chrome E2E Verification (`npm run e2e:verify`):**
-  - Probed isolated headless Chrome 158 with Prompt API flags (`LanguageModel.availability()` returned `timeout_6000ms` because on-device Gemini Nano weights are not pre-downloaded on the build machine).
-  - Verified true `Offline` PWA interaction + deterministic timeline recalculation + `ONLY_ON_DEVICE` local block with **0** outbound requests.
-  - Verified online automatic fallback (`PREFER_ON_DEVICE` -> `IN_CLOUD` via local dev SSE emulator) with `X-Firebase-AppCheck` header, multimodal PNG `inlineData` sign analysis, deterministic Schedule Optimizer `Keep` repair (`Conflicts: 2 -> 0`, `+100m buffer`), and `ONLY_ON_DEVICE` cloud-leak prevention.
-- **Secret & Git History Scan (`npm run scan:secrets`):** 0 secret, key, personal email, local path, or proprietary backend findings across working tree and commit history.
+The four screenshots below were captured directly from the built production bundle (`dist/`) running in isolated headless Google Chrome (`chrome` channel) with zero external network requests (`externalRequests: 0`, `consoleErrors: 0`):
+
+| Offline PWA Timeline Edit (`90m -> 75m` saved offline) | Privacy Vault Local Block (`ONLY_ON_DEVICE`, `0 bytes sent`) |
+|---|---|
+| ![Offline PWA Timeline Edit](docs/screenshots/01-offline-timeline-edit.png) | ![Privacy Vault Local Block](docs/screenshots/02-privacy-vault-local-block.png) |
+
+| Sign Vision Explicit Non-Escalation Gate | Firebase Competition Setup Status |
+|---|---|
+| ![Sign Vision Explicit Gate](docs/screenshots/03-explicit-cloud-gate-and-sign-vision.png) | ![Firebase Competition Setup](docs/screenshots/04-firebase-setup-spark-config.png) |
+
+---
+
+## Verification Summary (Observed Facts)
+
+- **Type-check (`tsc --noEmit`):** 0 TypeScript errors.
+- **Unit & Browser-ESM SDK Contract Tests (`npm test`):** `6/6` tests passing across `tests/scheduleEngine.test.ts` (2 tests) and `tests/hybridInference.test.ts` (4 tests against `@firebase/ai@3.1.0` + local HTTP SSE emulator covering `ON_DEVICE` routing, `ONLY_ON_DEVICE` leak prevention, multimodal PNG `inlineData`, and `X-Firebase-AppCheck` / `x-goog-api-client` headers).
+- **Chrome Bundle Verification:** Tested the built production bundle in isolated headless Chrome:
+  - Edited Kinkaku-ji duration (`90m -> 75m`), switched context offline, reloaded cleanly, and verified local persistence (`Local itinerary` / browser storage).
+  - Ran **Privacy Vault** with harmless demo notes (`Demo only: use the step-free entrance.`) and verified `BLOCKED BEFORE DISPATCH · Privacy Shield (0 bytes sent)` with 0 outbound cloud calls when Chrome Gemini Nano weights are not loaded.
+  - Verified **Sign Vision** PNG attachment + explicit non-escalation behavior and active-trip scoping when switching preset itineraries.
+- **Secret & Git History Hygiene (`npm run scan:secrets`):** 0 secrets, API keys, personal emails, local user paths, or restricted markers across working tree and commit history.
+- **Scope Note:** The public open-source build ships unbound (no bundled API keys or live Spark project credentials). Live Chrome Gemini Nano inference requires Chrome Built-in AI model weights to be enabled and downloaded on the reviewer's device; live cloud text fallback requires building with your own Spark-plan Firebase Web App and enforced App Check binding.
 
 ---
 
 ## Pre-Existing App Disclosure (`LvSyn NEXT`)
 
-- **Existing Foundation:** Prior to the `#BuildHybridAI` 2026 submission period, our team created **LvSyn NEXT**, an integrated trip editing environment (its web version is live, and the Android app has received Google Play production release approval and is currently in closed testing).
-- **Core Value Reused Conceptually:** The deterministic time-anchoring verification model and **Keep / Discard** co-editing pattern keep hybrid AI proposals grounded in real opening hours, transfer minutes, and return deadlines.
-- **Built During #BuildHybridAI 2026 (After Nov 11, 2026):** This repository is a clean, standalone, Apache-2.0 open-source Web/Chrome PWA written from scratch with zero proprietary backend secrets, introducing:
-  1. `firebase/ai` (`@firebase/ai@3.1.0`) hybrid inference (`PREFER_ON_DEVICE`, `ONLY_ON_DEVICE`, `PREFER_IN_CLOUD`, `ONLY_IN_CLOUD`), `initializeDeviceModel` download flow, and live `inferenceSource` telemetry.
-  2. **Strict On-Device Privacy Vault** (`ONLY_ON_DEVICE`) with a pre-flight local-only guard against `@firebase/ai@3.1.0` cloud fallback when `LanguageModel` is absent.
-  3. **Multimodal Sign & Notice Vision** passing PNG/JPEG `inlineData` through `ChromeAdapterImpl`.
-  4. **Firebase App Check**, **Remote Config**, **Offline Firestore persistence**, and a **Service Worker offline PWA shell**.
+- **Pre-Existing Work:** Before the `#BuildHybridAI` 2026 contest period, our team created **LvSyn NEXT**, an integrated travel planning environment whose core time-anchoring verification model and **Keep / Discard** itinerary co-editing concept inspired this entry.
+- **Developed During `#BuildHybridAI` 2026 (Standalone Repository):** This repository is an independent, clean-room Apache-2.0 Web/Chrome PWA built specifically for the hackathon, adding the `firebase/ai` Hybrid Inference integration, the `ONLY_ON_DEVICE` pre-flight Privacy Shield guard, multimodal PNG `inlineData` sign analysis, Firebase App Check & egress verification, Service Worker offline shell, and trip-scoped proposal review.
 
 ---
 
 ## Quickstart & Testing Instructions
 
-### Prerequisites
-- Node.js `>= 20` and npm
-- Google Chrome Desktop `>= 139` (tested on Chrome `158`)
+### Online Try-It-Out (Zero Credentials Required)
+Open **https://qaqaaa233.github.io/lvsyn-hybrid-trip-companion/** in Google Chrome Desktop (`>= 139`):
+1. In **Kyoto Family Day (Senior Parents)**, click **- 15m** on **Kinkaku-ji Golden Pavilion** (`90m -> 75m`) and watch the deterministic arrival/departure times and deadline buffer recalculate immediately.
+2. Open **Chrome DevTools → Network → Offline**, reload the page, and confirm the offline Service Worker shell loads with your shortened visit intact in local browser storage.
+3. Open **Privacy Vault**, enter any harmless test note (for example, `Demo only: use the step-free entrance.`), and click **Run Locally Only**. When on-device Gemini Nano weights are absent, the request aborts locally with **0 bytes** uploaded.
+4. Open **Sign Vision**, pick **Use Kyoto Teahouse Notice (PNG)**, and click **Analyze Sign Image** to verify multimodal attachment without silent cloud escalation.
+5. *(Optional, for On-Device Hardware Model Testing)* Enable `chrome://flags/#prompt-api-for-gemini-nano-multimodal-input` in Chrome, relaunch, click **Prepare Nano** when shown, and run **Concierge** or **Privacy Vault** offline on-device.
 
-### 1. Install Dependencies
+### Local Build & Tests
+- **Prerequisites:** Node.js `>= 20` and npm.
+
 ```bash
 npm install
-```
-
-### 2. Run Locally (Zero-Billing Local Cloud Emulator + Vite Dev Server)
-For fast local testing without any cloud credentials or billing:
-```bash
-# Terminal 1: Start the local Firebase AI Logic SSE cloud fallback emulator (port 8788)
-npm run dev:emulator
-
-# Terminal 2: Start the Vite app pointing to the local emulator
-VITE_AI_EMULATOR_URL=http://127.0.0.1:8788 npm run dev
-```
-You can also paste any Spark-plan Firebase Web Config or emulator URL directly in the UI via **Firebase Setup** without rebuilding.
-
-### 3. Enable Chrome On-Device Gemini Nano (For Live Hardware On-Device Inference)
-1. Open `chrome://flags/#prompt-api-for-gemini-nano-multimodal-input` and set it to **Enabled**, then relaunch Chrome.
-2. Open the app in Chrome and click **Prepare Nano** (calls `model.initializeDeviceModel()`), or verify in DevTools Console:
-   ```js
-   await LanguageModel.availability();
-   ```
-3. Once **Gemini Nano Ready** appears, open **Chrome DevTools → Network → Offline** and run **Concierge**, **Privacy Vault**, or **Sign Vision** with 0 outbound network calls.
-
-### 4. Connect a Free Spark-Plan Firebase Project (Zero Billing)
-1. Copy `.env.example` to `.env.local` (`.env.local` is gitignored).
-2. In the [Firebase Console](https://console.firebase.google.com/), create a **Spark plan (no-cost)** project (no billing account required for Gemini Developer API free tier).
-3. Go to **AI Services → AI Logic → Get started**, select **Gemini Developer API**, and enable **App Check**.
-4. For localhost testing, set `VITE_APPCHECK_DEBUG_TOKEN=true`, start the app, copy the printed `AppCheck debug token` from DevTools Console, and register it under **App Check → Apps → Manage debug tokens**.
-
-### 5. Run Verification Suites
-```bash
-# TypeScript type-check & production Vite bundle
 npm run build
-
-# Unit & real firebase/ai browser-ESM SDK contract tests
 npm test
-
-# Secret & full git history hygiene scan
 npm run scan:secrets
-
-# Automated Chrome E2E verification + screenshot capture
-npm run e2e:verify
 ```
+
+To test the local Firebase AI Logic SSE emulator in Vitest or development, inspect `scripts/local-cloud-emulator.mjs` and `.env.example` (no `.env.local` or live keys are ever committed).
 
 ---
 

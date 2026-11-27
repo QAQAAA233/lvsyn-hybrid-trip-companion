@@ -3,7 +3,8 @@ export function registerOfflineServiceWorker(): void {
   if (!import.meta.env?.PROD) return;
 
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
+    const swUrl = `${import.meta.env.BASE_URL || './'}sw.js`;
+    navigator.serviceWorker.register(swUrl).catch(() => {
       // Service worker registration is best-effort
     });
   });

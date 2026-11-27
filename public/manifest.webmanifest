@@ -2,13 +2,14 @@
   "name": "LvSyn Hybrid Trip Companion",
   "short_name": "LvSyn Hybrid",
   "description": "Offline-capable on-device + cloud hybrid AI trip editing companion powered by Firebase AI Logic, Gemini Nano, and deterministic schedule verification.",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#F8F7F4",
   "theme_color": "#059669",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "./icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
