@@ -68,6 +68,10 @@ export function App() {
   );
 
   const evaluation = useMemo(() => evaluateTripSchedule(activeTrip), [activeTrip]);
+  const activeTripProposals = useMemo(
+    () => proposals.filter((proposal) => proposal.tripId === activeTrip.id),
+    [proposals, activeTrip.id]
+  );
 
   const bootstrapSdk = useCallback(async () => {
     try {
@@ -194,6 +198,8 @@ export function App() {
 
     const placeholder: TripProposal = {
       id: proposalId,
+      // The prompt, preview and result all belong to the trip selected at Run.
+      tripId: activeTrip.id,
       kind: taskKind,
       prompt: userPrompt,
       responseText: '',
@@ -293,7 +299,7 @@ export function App() {
 
   const handleKeepProposal = (proposalId: string) => {
     const target = proposals.find((p) => p.id === proposalId);
-    if (!target || target.status !== 'pending' || target.patchOps.length === 0 ||
+    if (!target || target.tripId !== activeTrip.id || target.status !== 'pending' || target.patchOps.length === 0 ||
         target.telemetry.sourceEvidence !== 'sdk_terminal_response' || !target.responseText.trim()) return;
 
     persistTripUpdate((prev) => applyProposalOps(prev, target.patchOps));
@@ -304,7 +310,7 @@ export function App() {
 
   const handleDiscardProposal = (proposalId: string) => {
     setProposals((prev) =>
-      prev.map((p) => (p.id === proposalId ? { ...p, status: 'discarded' } : p))
+      prev.map((p) => (p.id === proposalId && p.tripId === activeTrip.id ? { ...p, status: 'discarded' } : p))
     );
   };
 
@@ -407,7 +413,7 @@ export function App() {
             }
             onRunTask={handleRunTask}
             isRunning={isRunning}
-            proposals={proposals}
+            proposals={activeTripProposals}
             onKeepProposal={handleKeepProposal}
             onDiscardProposal={handleDiscardProposal}
           />

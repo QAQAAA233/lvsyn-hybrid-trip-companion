@@ -31,6 +31,7 @@ export type ProposalStatus = 'streaming' | 'pending' | 'kept' | 'discarded' | 'e
 
 export interface TripProposal {
   id: string;
+  tripId: string;
   kind: TaskKind;
   prompt: string;
   responseText: string;

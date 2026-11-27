@@ -1,9 +1,10 @@
-const CACHE_NAME = 'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1-durable-ui';
+const CACHE_NAME = 'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1-durable-ui-same-trip';
 const SUPERSEDED_CONTEST_CACHES = new Set(['lvsyn-hybrid-shell-v1', 'lvsyn-hybrid-shell-req211-v2',
   'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71',
   'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126',
   'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary',
-  'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1']);
+  'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1',
+  'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1-durable-ui']);
 const CORE_ASSETS = [
   '/manifest.webmanifest',
   '/icon.svg',
