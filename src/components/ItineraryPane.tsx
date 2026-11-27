@@ -332,20 +332,6 @@ export function ItineraryPane({
                 {stop.notes && <span className="text-stone-500">{stop.notes}</span>}
               </div>
 
-              {ev.conflicts.length > 0 && (
-                <div className="mt-2 pl-8 space-y-0.5">
-                  {ev.conflicts.map((c, cIdx) => (
-                    <p
-                      key={cIdx}
-                      className={`text-[11px] font-medium ${
-                        c.severity === 'error' ? 'text-rose-700' : 'text-amber-700'
-                      }`}
-                    >
-                      • {c.message}
-                    </p>
-                  ))}
-                </div>
-              )}
             </div>
           );
         })}

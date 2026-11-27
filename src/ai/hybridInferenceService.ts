@@ -1,3 +1,4 @@
+import { setLogLevel } from 'firebase/app';
 import {
   getGenerativeModel,
   InferenceMode,
@@ -43,6 +44,14 @@ export interface HybridExecutionResult {
   telemetry: InferenceTelemetry;
 }
 
+export function setFirebaseDebugLogging(enabled: boolean): void {
+  setLogLevel(enabled ? 'debug' : 'silent');
+}
+
+if (typeof globalThis !== 'undefined') {
+  (globalThis as Record<string, unknown>).__lvsynSetFirebaseLogLevel = setFirebaseDebugLogging;
+}
+
 function getGlobalLanguageModel(): LanguageModelProviderLike | undefined {
   return (globalThis as unknown as { LanguageModel?: LanguageModelProviderLike }).LanguageModel;
 }
@@ -57,12 +66,12 @@ export async function checkOnDeviceAvailability(
 
   try {
     const expectedInputs = includeImage
-      ? [{ type: 'text' }, { type: 'image' }]
-      : [{ type: 'text' }];
+      ? [{ type: 'text', languages: ['en'] }, { type: 'image' }]
+      : [{ type: 'text', languages: ['en'] }];
     const result = await Promise.race<string>([
       lm.availability({
         expectedInputs,
-        expectedOutputs: [{ type: 'text' }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
       }),
       new Promise<string>((resolve) =>
         setTimeout(() => resolve('unavailable'), 3500)
@@ -77,9 +86,7 @@ export async function checkOnDeviceAvailability(
     }
     return 'unavailable';
   } catch {
-    if (includeImage) {
-      return checkOnDeviceAvailability(false);
-    }
+    // Do not downgrade image capability checks to text-only availability.
     return 'unavailable';
   }
 }
@@ -93,8 +100,8 @@ export async function initializeOnDeviceModel(
     mode: InferenceMode.ONLY_ON_DEVICE,
     onDeviceParams: {
       createOptions: {
-        expectedInputs: [{ type: 'text' }],
-        expectedOutputs: [{ type: 'text' }],
+        expectedInputs: [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
       },
     },
     inCloudParams: {
@@ -136,9 +143,9 @@ export async function runHybridPrompt(
       createOptions: {
         ...(signal ? { signal } : {}),
         expectedInputs: hasImage
-          ? [{ type: 'text' }, { type: 'image' }]
-          : [{ type: 'text' }],
-        expectedOutputs: [{ type: 'text' }],
+          ? [{ type: 'text', languages: ['en'] }, { type: 'image' }]
+          : [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
       },
     },
     inCloudParams: {
@@ -153,6 +160,9 @@ export async function runHybridPrompt(
 
   const parts: Array<string | Part> = [req.prompt];
   if (req.imageAttachment) {
+    if (req.imageAttachment.mimeType !== 'image/png' && req.imageAttachment.mimeType !== 'image/jpeg') {
+      throw new Error('REQ211_UNSUPPORTED_IMAGE_MIME');
+    }
     parts.push({
       type: 'inlineData',
       inlineData: {

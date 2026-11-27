@@ -57,32 +57,39 @@ export function TelemetryInspector({ entries }: TelemetryInspectorProps) {
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-2.5">
-          <p className="text-[11px] font-medium text-emerald-800">On-Device Runs</p>
-          <p className="mt-0.5 text-lg font-bold tabular-nums text-emerald-950">
-            {onDeviceRuns.length}
-          </p>
+      {entries.length === 0 ? (
+        <p className="text-xs text-stone-500">
+          Run any AI task or click Verify On-Device above to inspect live{' '}
+          <code className="rounded bg-stone-100 px-1 py-0.5 text-[11px]">inferenceSource</code>, latency, and network telemetry.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-2.5">
+            <p className="text-[11px] font-medium text-emerald-800">On-Device Runs</p>
+            <p className="mt-0.5 text-lg font-bold tabular-nums text-emerald-950">
+              {onDeviceRuns.length}
+            </p>
+          </div>
+          <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-2.5">
+            <p className="text-[11px] font-medium text-blue-800">Confirmed Cloud Runs</p>
+            <p className="mt-0.5 text-lg font-bold tabular-nums text-blue-950">
+              {inCloudRuns.length}
+            </p>
+          </div>
+          <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
+            <p className="text-[11px] font-medium text-stone-600">Avg Local Latency</p>
+            <p className="mt-0.5 text-lg font-bold tabular-nums text-stone-900">
+              {avgLocalMs !== null ? `${avgLocalMs} ms` : '—'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
+            <p className="text-[11px] font-medium text-stone-600">Source Unverified</p>
+            <p className="mt-0.5 text-lg font-bold tabular-nums text-stone-900">
+              {entries.filter((e) => sourceForDisplay(e) === 'source_unverified').length}
+            </p>
+          </div>
         </div>
-        <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-2.5">
-          <p className="text-[11px] font-medium text-blue-800">Confirmed Cloud Runs</p>
-          <p className="mt-0.5 text-lg font-bold tabular-nums text-blue-950">
-            {inCloudRuns.length}
-          </p>
-        </div>
-        <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
-          <p className="text-[11px] font-medium text-stone-600">Avg Local Latency</p>
-          <p className="mt-0.5 text-lg font-bold tabular-nums text-stone-900">
-            {avgLocalMs !== null ? `${avgLocalMs} ms` : '—'}
-          </p>
-        </div>
-        <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
-          <p className="text-[11px] font-medium text-stone-600">Source Unverified</p>
-          <p className="mt-0.5 text-lg font-bold tabular-nums text-stone-900">
-            {entries.filter((e) => sourceForDisplay(e) === 'source_unverified').length}
-          </p>
-        </div>
-      </div>
+      )}
 
       {entries.length > 0 && (
         <div className="mt-3 overflow-x-auto">

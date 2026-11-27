@@ -6,13 +6,16 @@ import {
   Cloud,
   Clock,
   Cpu,
+  Download,
   Lock,
+  RefreshCw,
   Send,
   ShieldAlert,
   Sparkles,
   Wrench,
   X,
 } from 'lucide-react';
+import type { LocalModelAvailability } from '../ai/hybridInferenceService';
 import { stripJsonBlocksForDisplay, type TaskKind, type TripProposal } from '../domain/proposal';
 import { formatMinutes, type Trip } from '../domain/trip';
 
@@ -20,6 +23,15 @@ interface HybridStudioPaneProps {
   trip: Trip;
   activeTab: TaskKind;
   onSelectTab: (tab: TaskKind) => void;
+  nanoAvailability: LocalModelAvailability;
+  nanoImageAvailability: LocalModelAvailability;
+  downloadPercent: number | null;
+  nanoInitMessage: string | null;
+  debugSdkLogs: boolean;
+  onToggleDebugSdkLogs: (enabled: boolean) => void;
+  onInitializeNano: () => void;
+  onRefreshNano: () => void;
+  onVerifyOnDevice: () => void;
   onUpdatePrivateNotes: (notes: string) => void;
   onRunTask: (args: {
     taskKind: TaskKind;
@@ -90,6 +102,15 @@ export function HybridStudioPane({
   trip,
   activeTab,
   onSelectTab,
+  nanoAvailability,
+  nanoImageAvailability,
+  downloadPercent,
+  nanoInitMessage,
+  debugSdkLogs,
+  onToggleDebugSdkLogs,
+  onInitializeNano,
+  onRefreshNano,
+  onVerifyOnDevice,
   onUpdatePrivateNotes,
   onRunTask,
   isRunning,
@@ -174,6 +195,96 @@ export function HybridStudioPane({
             <code className="rounded bg-stone-100 px-1 py-0.5 text-[11px]">inferenceSource</code>
           </p>
         </div>
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-medium text-stone-700">
+          <input
+            type="checkbox"
+            data-testid="debug-logs-toggle"
+            checked={debugSdkLogs}
+            onChange={(e) => onToggleDebugSdkLogs(e.target.checked)}
+          />
+          Debug SDK Logs
+        </label>
+      </div>
+
+      {/* On-Device Proof & Control Strip */}
+      <div
+        data-testid="on-device-proof-panel"
+        className="space-y-2 rounded-xl border border-stone-200 bg-stone-50/70 px-3 py-2.5 text-xs"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-700">
+            <span className="font-semibold text-stone-900">LanguageModel.availability():</span>
+            <code
+              data-testid="nano-text-availability"
+              className={`rounded px-1.5 py-0.5 font-semibold ${
+                nanoAvailability === 'available'
+                  ? 'bg-emerald-100 text-emerald-900'
+                  : 'bg-stone-200 text-stone-800'
+              }`}
+            >
+              text: {nanoAvailability}
+            </code>
+            <code
+              data-testid="nano-image-availability"
+              className={`rounded px-1.5 py-0.5 font-semibold ${
+                nanoImageAvailability === 'available'
+                  ? 'bg-emerald-100 text-emerald-900'
+                  : 'bg-stone-200 text-stone-800'
+              }`}
+            >
+              image: {nanoImageAvailability}
+            </code>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              data-testid="refresh-nano-btn"
+              onClick={onRefreshNano}
+              className="inline-flex items-center gap-1 rounded-lg border border-stone-300 bg-white px-2 py-1 text-[11px] font-semibold text-stone-700 hover:bg-stone-100"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Refresh
+            </button>
+            {nanoAvailability !== 'available' && (
+              <button
+                type="button"
+                data-testid="studio-init-nano-btn"
+                disabled={downloadPercent !== null && downloadPercent < 100}
+                onClick={onInitializeNano}
+                className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+              >
+                <Download className="h-3 w-3" />
+                {downloadPercent !== null && downloadPercent < 100
+                  ? `Downloading ${downloadPercent}%`
+                  : 'Enable On-Device AI'}
+              </button>
+            )}
+            <button
+              type="button"
+              data-testid="verify-on-device-btn"
+              disabled={isRunning}
+              onClick={onVerifyOnDevice}
+              className="inline-flex items-center gap-1 rounded-lg border border-emerald-600 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+            >
+              <Cpu className="h-3 w-3" />
+              Verify On-Device (ONLY_ON_DEVICE)
+            </button>
+          </div>
+        </div>
+
+        {nanoAvailability === 'unavailable' && (
+          <p className="text-[11px] text-stone-500">
+            Desktop Chrome 139+ required · Enable{' '}
+            <code>chrome://flags/#prompt-api-for-gemini-nano-multimodal-input</code> &amp; check{' '}
+            <code>chrome://on-device-internals</code>.
+          </p>
+        )}
+        {nanoInitMessage && (
+          <p data-testid="nano-init-message" className="text-[11px] font-medium text-stone-700">
+            {nanoInitMessage}
+          </p>
+        )}
       </div>
 
       {/* Mode Tabs */}
@@ -432,17 +543,17 @@ export function HybridStudioPane({
                 icon: <X className="h-3.5 w-3.5" />,
               };
               if (isOnDevice) return {
-                label: 'ON-DEVICE · Gemini Nano',
+                label: 'ON-DEVICE · inferenceSource: "on_device"',
                 cls: 'border-emerald-300 bg-emerald-100 text-emerald-900',
                 icon: <Cpu className="h-3.5 w-3.5" />,
               };
               if (isEmulator) return {
-                label: 'LOCAL EMULATOR · Not Firebase cloud',
+                label: 'LOCAL EMULATOR · inferenceSource: "local_emulator"',
                 cls: 'border-stone-300 bg-stone-100 text-stone-900',
                 icon: <Cpu className="h-3.5 w-3.5" />,
               };
               return {
-                label: isCloud ? 'IN-CLOUD · Gemini' : 'SOURCE UNVERIFIED · Result not used',
+                label: isCloud ? 'IN-CLOUD · inferenceSource: "in_cloud"' : 'SOURCE UNVERIFIED · Result not used',
                 cls: isCloud ? 'border-blue-300 bg-blue-100 text-blue-900' :
                   'border-amber-300 bg-amber-100 text-amber-900',
                 icon: isCloud ? <Cloud className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />,

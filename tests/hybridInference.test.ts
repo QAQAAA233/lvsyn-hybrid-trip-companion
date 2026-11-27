@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { deleteApp, getApps, initializeApp } from 'firebase/app';
 import { getAI, GoogleAIBackend, InferenceMode, InferenceSource, type AI } from 'firebase/ai';
 import { CustomProvider, initializeAppCheck } from 'firebase/app-check';
-import { runHybridPrompt } from '../src/ai/hybridInferenceService';
+import { checkOnDeviceAvailability, runHybridPrompt } from '../src/ai/hybridInferenceService';
 import {
   startCloudEmulatorServer,
   type CloudEmulatorHandle,
@@ -204,5 +204,41 @@ describe('Firebase AI Logic Hybrid Inference SDK Contract', () => {
     expect(cloudVision.telemetry.actualSource).toBe('local_emulator');
     expect(cloudVision.telemetry.estimatedCloudCostUsd).toBe(0);
     expect(emulator.getRequests()).toHaveLength(1);
+  });
+
+  it('never reports image availability from text-only availability when multimodal check fails', async () => {
+    const g = globalThis as Record<string, unknown>;
+    g.LanguageModel = {
+      async availability(opts?: { expectedInputs?: Array<{ type: string }> }) {
+        const hasImage = opts?.expectedInputs?.some((i) => i.type === 'image');
+        if (hasImage) throw new Error('Image modality unsupported');
+        return 'available';
+      },
+    };
+    expect(await checkOnDeviceAvailability(false)).toBe('available');
+    expect(await checkOnDeviceAvailability(true)).toBe('unavailable');
+  });
+
+  it('rejects unsupported non-PNG/JPEG inline image MIME types without cloud egress', async () => {
+    installMockLanguageModel('unavailable');
+    await expect(
+      runHybridPrompt(
+        {
+          ai,
+          taskKind: 'sign_vision',
+          requestedMode: InferenceMode.PREFER_ON_DEVICE,
+          cloudModel: 'gemini-3.5-flash-lite',
+          emulatorBaseUrl: emulator.url,
+          appCheckMode: 'local_emulator_provider',
+          prompt: 'Analyze attached document',
+          imageAttachment: {
+            base64Data: TINY_PNG_BASE64,
+            mimeType: 'application/pdf' as 'image/png',
+          },
+        },
+        () => {}
+      )
+    ).rejects.toThrow('REQ211_UNSUPPORTED_IMAGE_MIME');
+    expect(emulator.getRequests()).toHaveLength(0);
   });
 });

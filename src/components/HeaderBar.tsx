@@ -50,12 +50,6 @@ export function HeaderBar({
   onOpenSetup,
 }: HeaderBarProps) {
   const cloudCanBeSelected=isLiveProject&&isOnline&&cloudAttemptStatus?.state==='available';
-  const cloudSummary=!isLiveProject?'Cloud locked for this build.':
-    !isOnline?'Cloud paused while offline.':
-    cloudAttemptStatus?.state==='spent'?'Daily cloud attempts used. Cloud is paused until the next UTC day.':
-    cloudAttemptStatus?.state==='unavailable'?'Cannot verify local cloud allowance. Cloud is paused.':
-    cloudAttemptStatus?.state==='available'?'Cloud is available only when explicitly selected.':
-    'Checking this browser’s cloud allowance…';
   const nanoBadge = (() => {
     if (downloadPercent !== null && downloadPercent < 100) {
       return {
@@ -65,28 +59,28 @@ export function HeaderBar({
     }
     if (nanoAvailability === 'available') {
       return {
-        label: 'Gemini Nano available (not a result)',
+        label: 'On-Device AI: available',
         className: 'bg-emerald-50 text-emerald-800 border-emerald-200',
       };
     }
     if (nanoAvailability === 'downloadable' || nanoAvailability === 'downloading') {
       return {
-        label: 'Nano Downloadable',
+        label: `On-Device AI: ${nanoAvailability}`,
         className: 'bg-amber-50 text-amber-800 border-amber-200',
       };
     }
     return {
-      label: isLiveProject ? 'Nano unavailable · use local timeline or explicitly select cloud' : 'Nano unavailable · cloud locked',
-      className: 'bg-blue-50 text-blue-800 border-blue-200',
+      label: 'On-Device AI: unavailable',
+      className: 'bg-stone-100 text-stone-700 border-stone-200',
     };
   })();
 
   const appCheckLabel = (() => {
-    if (appCheckMode === 'recaptcha_enterprise') return 'App Check: Enterprise required (on explicit cloud request)';
+    if (appCheckMode === 'recaptcha_enterprise') return 'App Check: Enterprise';
     if (appCheckMode === 'recaptcha_v3') return 'App Check: reCAPTCHA v3';
     if (appCheckMode === 'debug_token') return 'App Check: Debug Token';
-    if (appCheckMode === 'local_emulator_provider') return 'App Check: Emulator Token';
-    return isLiveProject ? 'App Check: Pending' : 'App Check: Local Demo';
+    if (appCheckMode === 'local_emulator_provider') return 'App Check: Emulator';
+    return isLiveProject ? 'App Check: Pending' : 'App Check: Local-Only';
   })();
 
   return (
@@ -106,7 +100,7 @@ export function HeaderBar({
               </span>
             </div>
             <p className="text-xs text-stone-500">
-              On-device Chrome Gemini Nano + optional gated cloud text + deterministic schedule verification
+              On-device Chrome Gemini Nano + gated cloud text + deterministic schedule verification
             </p>
           </div>
         </div>
@@ -156,15 +150,16 @@ export function HeaderBar({
             {nanoBadge.label}
           </span>
 
-          {(nanoAvailability === 'downloadable' || nanoAvailability === 'downloading') && (
+          {nanoAvailability !== 'available' && (
             <button
               type="button"
               data-testid="init-nano-btn"
+              disabled={downloadPercent !== null && downloadPercent < 100}
               onClick={onInitializeNano}
-              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700"
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
             >
               <Download className="h-3.5 w-3.5" />
-              Prepare Nano
+              {downloadPercent !== null && downloadPercent < 100 ? `Downloading ${downloadPercent}%` : 'Enable On-Device AI'}
             </button>
           )}
 
@@ -184,7 +179,7 @@ export function HeaderBar({
           )}
 
           <label className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-700">
-            <span className="text-stone-500">{isLiveProject ? 'Mode:' : 'Mode · local only:'}</span>
+            <span className="text-stone-500">Mode:</span>
             <select
               aria-label="Inference mode"
               data-testid="inference-mode-select"
@@ -198,19 +193,6 @@ export function HeaderBar({
               <option value={InferenceMode.ONLY_IN_CLOUD} disabled={!cloudCanBeSelected}>ONLY_IN_CLOUD</option>
             </select>
           </label>
-
-          <div className="min-w-0 text-xs text-stone-700" data-testid="cloud-attempt-budget">
-            <div role="status" aria-live="polite" aria-atomic="true">
-              <strong>{cloudSummary}</strong>
-              {isLiveProject && cloudAttemptStatus && cloudAttemptStatus.state!=='unavailable' && (
-                <span> {cloudAttemptStatus.attempts}/{cloudAttemptStatus.limit} attempts today (UTC; this browser only).</span>
-              )}
-            </div>
-            <p className="m-0 text-stone-600">No automatic retry. This is not a Firebase quota or billing limit.</p>
-            <a href="#local-itinerary" className="inline-flex min-h-11 items-center font-semibold text-emerald-800 underline">
-              Edit the local timeline manually
-            </a>
-          </div>
 
           <button
             type="button"

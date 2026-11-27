@@ -4,6 +4,7 @@ import {
   checkOnDeviceAvailability,
   initializeOnDeviceModel,
   runCompetitionPrompt,
+  setFirebaseDebugLogging,
   type LocalModelAvailability,
 } from './ai/hybridInferenceService';
 import {
@@ -53,6 +54,10 @@ export function App() {
   const cloudBound=Boolean(firebaseHandle?.setup.isLiveProject);
   const [nanoAvailability, setNanoAvailability] =
     useState<LocalModelAvailability>('unavailable');
+  const [nanoImageAvailability, setNanoImageAvailability] =
+    useState<LocalModelAvailability>('unavailable');
+  const [nanoInitMessage, setNanoInitMessage] = useState<string | null>(null);
+  const [debugSdkLogs, setDebugSdkLogs] = useState(false);
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
   const [inferenceMode, setInferenceMode] = useState<InferenceMode>(
     InferenceMode.PREFER_ON_DEVICE
@@ -73,16 +78,27 @@ export function App() {
     [proposals, activeTrip.id]
   );
 
+  const refreshNanoAvailability = useCallback(async () => {
+    const [textState, imageState] = await Promise.all([
+      checkOnDeviceAvailability(false),
+      checkOnDeviceAvailability(true),
+    ]);
+    setNanoAvailability(textState);
+    setNanoImageAvailability(imageState);
+    return textState;
+  }, []);
+
   const bootstrapSdk = useCallback(async () => {
     try {
       const handle = await initializeFirebaseServices();
       setFirebaseHandle(handle);
-      setNanoAvailability(await checkOnDeviceAvailability(false));
+      await refreshNanoAvailability();
     } catch {
       // Keep the timeline available. A later deliberate Run attempts a fresh local session.
       setNanoAvailability('unavailable');
+      setNanoImageAvailability('unavailable');
     }
-  }, []);
+  }, [refreshNanoAvailability]);
 
   useEffect(() => {
     void bootstrapSdk();
@@ -134,6 +150,7 @@ export function App() {
   const handleInitializeNano = async () => {
     if (!firebaseHandle) return;
     setDownloadPercent(0);
+    setNanoInitMessage(null);
     try {
       await initializeOnDeviceModel(
         firebaseHandle.ai,
@@ -141,17 +158,32 @@ export function App() {
         (pct) => setDownloadPercent(pct)
       );
       setDownloadPercent(100);
-      setNanoAvailability(await checkOnDeviceAvailability(false));
-    } catch {
+      const nextState = await refreshNanoAvailability();
+      setNanoInitMessage(
+        nextState === 'available'
+          ? 'Gemini Nano initialized and ready on this device.'
+          : `Model initialization finished with status "${nextState}".`
+      );
+    } catch (err) {
       setDownloadPercent(null);
-      setNanoAvailability(await checkOnDeviceAvailability(false));
+      const nextState = await refreshNanoAvailability();
+      const reason = err instanceof Error ? err.message : String(err);
+      setNanoInitMessage(
+        `Unable to activate Chrome Gemini Nano (status: ${nextState}). ${reason}`
+      );
     }
+  };
+
+  const handleToggleDebugSdkLogs = (enabled: boolean) => {
+    setDebugSdkLogs(enabled);
+    setFirebaseDebugLogging(enabled);
   };
 
   const handleRunTask = async ({
     taskKind,
     userPrompt,
     imageAttachment,
+    overrideMode,
   }: {
     taskKind: TaskKind;
     userPrompt: string;
@@ -161,6 +193,7 @@ export function App() {
       previewUrl: string;
       label: string;
     };
+    overrideMode?: InferenceMode;
   }) => {
     setIsRunning(true);
 
@@ -179,7 +212,8 @@ export function App() {
     })();
 
     const requestedMode =
-      taskKind === 'privacy_vault' ? InferenceMode.ONLY_ON_DEVICE : inferenceMode;
+      overrideMode ??
+      (taskKind === 'privacy_vault' ? InferenceMode.ONLY_ON_DEVICE : inferenceMode);
 
     const initialTelemetry: InferenceTelemetry = {
       id: `tel-pending-${proposalId}`,
@@ -404,6 +438,23 @@ export function App() {
             trip={activeTrip}
             activeTab={activeTab}
             onSelectTab={setActiveTab}
+            nanoAvailability={nanoAvailability}
+            nanoImageAvailability={nanoImageAvailability}
+            downloadPercent={downloadPercent}
+            nanoInitMessage={nanoInitMessage}
+            debugSdkLogs={debugSdkLogs}
+            onToggleDebugSdkLogs={handleToggleDebugSdkLogs}
+            onInitializeNano={handleInitializeNano}
+            onRefreshNano={() => {
+              void refreshNanoAvailability();
+            }}
+            onVerifyOnDevice={() =>
+              handleRunTask({
+                taskKind: 'privacy_vault',
+                userPrompt: 'Demo only: use the step-free entrance.',
+                overrideMode: InferenceMode.ONLY_ON_DEVICE,
+              })
+            }
             onUpdatePrivateNotes={(notes) =>
               persistTripUpdate((prev) => ({
                 ...prev,
