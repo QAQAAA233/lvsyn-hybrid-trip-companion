@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1-durable-ui-same-trip-subpath-v1';
+const CACHE_NAME = 'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1-durable-ui-same-trip-subpath-v2-netfirst';
 const SUPERSEDED_CONTEST_CACHES = new Set([
   'lvsyn-hybrid-shell-v1',
   'lvsyn-hybrid-shell-req211-v2',
@@ -8,6 +8,7 @@ const SUPERSEDED_CONTEST_CACHES = new Set([
   'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1',
   'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1-durable-ui',
   'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1-durable-ui-same-trip',
+  'lvsyn-hybrid-shell-req211-v2-283ac9d9-608e2f71-source-proof-1126-native-boundary-attempt-v1-durable-ui-same-trip-subpath-v1',
 ]);
 
 const SCOPE_URL = new URL('./', self.registration.scope);
@@ -76,22 +77,42 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin || !url.href.startsWith(SCOPE_URL.href)) return;
   const relPath = url.pathname.slice(SCOPE_URL.pathname.length);
+  const isDocument = req.mode === 'navigate' || relPath === '' || relPath === 'index.html';
+
+  if (isDocument) {
+    // Network-first for HTML shell so returning visitors receive updated JS/CSS bundles immediately when online,
+    // while falling back to the cached offline shell whenever disconnected.
+    event.respondWith(
+      fetch(new Request(req.url, { cache: 'no-cache' }))
+        .then((response) => {
+          if (response && response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(req, clone.clone());
+              cache.put(scopedUrl('index.html'), clone);
+            });
+          }
+          return response;
+        })
+        .catch(() =>
+          caches.open(CACHE_NAME).then((cache) =>
+            cache.match(req).then((m) => m || cache.match(scopedUrl('index.html')) || cache.match(SCOPE_URL.href))
+          ).then((cached) => cached || new Response('Offline', { status: 503, statusText: 'Offline' }))
+        )
+    );
+    return;
+  }
 
   event.respondWith(
     caches.open(CACHE_NAME).then((cache) => cache.match(req)).then((cached) => {
       if (cached) return cached;
       return fetch(req).then((response) => {
-        if (response && response.ok && (relPath.startsWith('assets/') || relPath.startsWith('samples/') || relPath === '')) {
+        if (response && response.ok && (relPath.startsWith('assets/') || relPath.startsWith('samples/'))) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
         }
         return response;
-      }).catch(() => {
-        if (req.mode === 'navigate') {
-          return caches.open(CACHE_NAME).then((cache) => cache.match(scopedUrl('index.html')));
-        }
-        return new Response('Offline', { status: 503, statusText: 'Offline' });
-      });
+      }).catch(() => new Response('Offline', { status: 503, statusText: 'Offline' }));
     })
   );
 });
