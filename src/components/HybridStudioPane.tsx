@@ -25,6 +25,12 @@ interface HybridStudioPaneProps {
   onSelectTab: (tab: TaskKind) => void;
   nanoAvailability: LocalModelAvailability;
   nanoImageAvailability: LocalModelAvailability;
+  nanoChecking: boolean;
+  canPrepareDevice: boolean;
+  canRunDeviceText: boolean;
+  canRunDeviceImage: boolean;
+  canRunSelectedText: boolean;
+  allowDeviceImageInSelectedMode: boolean;
   downloadPercent: number | null;
   nanoInitMessage: string | null;
   debugSdkLogs: boolean;
@@ -104,6 +110,12 @@ export function HybridStudioPane({
   onSelectTab,
   nanoAvailability,
   nanoImageAvailability,
+  nanoChecking,
+  canPrepareDevice,
+  canRunDeviceText,
+  canRunDeviceImage,
+  canRunSelectedText,
+  allowDeviceImageInSelectedMode,
   downloadPercent,
   nanoInitMessage,
   debugSdkLogs,
@@ -191,8 +203,8 @@ export function HybridStudioPane({
             Hybrid AI Studio &amp; Verification
           </h2>
           <p className="text-xs text-stone-500">
-            Every run executes through Firebase AI Logic and reports verified{' '}
-            <code className="rounded bg-stone-100 px-1 py-0.5 text-[11px]">inferenceSource</code>
+            Completed model responses show a verified source. Mode selection is explicit;
+            a local preference does not fall back to cloud.
           </p>
         </div>
         <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-medium text-stone-700">
@@ -222,7 +234,7 @@ export function HybridStudioPane({
                   : 'bg-stone-200 text-stone-800'
               }`}
             >
-              text: {nanoAvailability}
+              text: {nanoChecking ? 'checking' : nanoAvailability}
             </code>
             <code
               data-testid="nano-image-availability"
@@ -232,7 +244,7 @@ export function HybridStudioPane({
                   : 'bg-stone-200 text-stone-800'
               }`}
             >
-              image: {nanoImageAvailability}
+              image: {nanoChecking ? 'checking' : nanoImageAvailability}
             </code>
           </div>
 
@@ -250,7 +262,7 @@ export function HybridStudioPane({
               <button
                 type="button"
                 data-testid="studio-init-nano-btn"
-                disabled={downloadPercent !== null && downloadPercent < 100}
+                disabled={!canPrepareDevice || downloadPercent !== null && downloadPercent < 100}
                 onClick={onInitializeNano}
                 className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
               >
@@ -263,7 +275,8 @@ export function HybridStudioPane({
             <button
               type="button"
               data-testid="verify-on-device-btn"
-              disabled={isRunning}
+              disabled={isRunning || !canRunDeviceText}
+              aria-describedby="device-readiness-guidance"
               onClick={onVerifyOnDevice}
               className="inline-flex items-center gap-1 rounded-lg border border-emerald-600 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
             >
@@ -273,8 +286,15 @@ export function HybridStudioPane({
           </div>
         </div>
 
-        {nanoAvailability === 'unavailable' && (
-          <p className="text-[11px] text-stone-500">
+        <p id="device-readiness-guidance" className="text-[11px] text-stone-700">
+          {nanoChecking ? 'Checking device support; no model has been run by this check.'
+            : !canRunDeviceText && canPrepareDevice ? 'Gemini Nano is downloadable on this browser. Click "Enable On-Device AI" to download the on-device model (no flags needed), or switch Mode to cloud if configured.'
+              : !canRunDeviceText ? 'On-device text is not available. Refresh after changing browser support. The itinerary remains editable.'
+                : !canRunDeviceImage ? 'On-device text is ready. Sign images need separate on-device support.'
+                  : 'On-device text and image are ready. Verification requires a completed response.'}
+        </p>
+        {!nanoChecking && nanoAvailability === 'unavailable' && (
+          <p className="text-[11px] text-stone-500 [overflow-wrap:anywhere]">
             Desktop Chrome 139+ required · Enable{' '}
             <code>chrome://flags/#prompt-api-for-gemini-nano-multimodal-input</code> &amp; check{' '}
             <code>chrome://on-device-internals</code>.
@@ -340,11 +360,14 @@ export function HybridStudioPane({
           />
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] text-stone-500">
-              Respects active Mode selector (default: <code>PREFER_ON_DEVICE</code>)
+              <span id="selected-route-guidance">{canRunSelectedText
+                ? 'Uses the selected mode.'
+                : 'No available route for the selected mode. Edit and check the itinerary without a model.'}</span>
             </span>
             <button
               type="button"
-              disabled={isRunning || !conciergeInput.trim()}
+              disabled={isRunning || !canRunSelectedText || !conciergeInput.trim()}
+              aria-describedby="selected-route-guidance"
               data-testid="run-concierge-btn"
               onClick={() =>
                 onRunTask({ taskKind: 'concierge', userPrompt: conciergeInput.trim() })
@@ -388,11 +411,12 @@ export function HybridStudioPane({
               type="text"
               value={privacyInput}
               onChange={(e) => setPrivacyInput(e.target.value)}
-              className="min-w-[220px] flex-1 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs"
+              className="min-w-0 basis-48 flex-1 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs"
             />
             <button
               type="button"
-              disabled={isRunning}
+              disabled={isRunning || !canRunDeviceText || !privacyInput.trim()}
+              aria-describedby="device-readiness-guidance"
               data-testid="run-privacy-btn"
               onClick={() =>
                 onRunTask({ taskKind: 'privacy_vault', userPrompt: privacyInput.trim() })
@@ -447,16 +471,22 @@ export function HybridStudioPane({
             </div>
           )}
 
+          <p id="sign-route-guidance" className="text-[11px] text-stone-700">
+            {!allowDeviceImageInSelectedMode
+              ? 'Images stay on device. Select a mode that allows on-device inference.'
+              : canRunDeviceImage ? 'Images run on this device only.' : 'On-device image inference is not available in this browser.'}
+          </p>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <input
               type="text"
               value={visionInput}
               onChange={(e) => setVisionInput(e.target.value)}
-              className="min-w-[220px] flex-1 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs"
+              className="min-w-0 basis-48 flex-1 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs"
             />
             <button
               type="button"
-              disabled={isRunning || !selectedImage}
+              disabled={isRunning || !canRunDeviceImage || !allowDeviceImageInSelectedMode || !selectedImage}
+              aria-describedby="sign-route-guidance"
               data-testid="run-vision-btn"
               onClick={async () => {
                 if (!selectedImage) return;
@@ -482,6 +512,9 @@ export function HybridStudioPane({
             exact arrival times &amp; conflict resolution before you click <strong>Keep</strong> or{' '}
             <strong>Discard</strong>.
           </p>
+          <p id="optimizer-route-guidance" className="text-[11px] text-stone-700">
+            {canRunSelectedText ? 'Uses the selected mode.' : 'No available route for the selected mode. You can edit and check the schedule without a model.'}
+          </p>
           <textarea
             rows={2}
             value={optimizerInput}
@@ -491,7 +524,8 @@ export function HybridStudioPane({
           <div className="flex justify-end">
             <button
               type="button"
-              disabled={isRunning || !optimizerInput.trim()}
+              disabled={isRunning || !canRunSelectedText || !optimizerInput.trim()}
+              aria-describedby="optimizer-route-guidance"
               data-testid="run-optimizer-btn"
               onClick={() =>
                 onRunTask({ taskKind: 'schedule_optimize', userPrompt: optimizerInput.trim() })
@@ -572,6 +606,8 @@ export function HybridStudioPane({
               REQ211_TERMINAL_TEXT_MISSING: 'The SDK completed without a usable reply. No provider result was recorded. You can run again.',
               REQ211_NATIVE_TIME_LIMIT: 'The device model did not finish within 30 seconds. No partial result was used. You can run again after it stops.',
               REQ211_NATIVE_DRAINING: 'The previous device request is still stopping. No second model request was started.',
+              REQ211_NANO_DOWNLOAD_REQUIRED: 'Chrome Gemini Nano is downloadable on this browser. Click "Enable On-Device AI" above to download the local model, or explicitly select a cloud mode if available.',
+              REQ211_CLOUD_INTERRUPTED: 'Connection dropped while the cloud request was pending. The interrupted request was canceled and will not auto-resume on reconnect.',
             }));
             const recoveryText = recoveryByCode.get(p.errorMessage ?? '') ||
               (isBlocked ? 'Gemini Nano is unavailable. The request stopped before any model call.' :

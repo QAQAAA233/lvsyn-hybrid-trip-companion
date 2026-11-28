@@ -59,8 +59,7 @@ export function TelemetryInspector({ entries }: TelemetryInspectorProps) {
 
       {entries.length === 0 ? (
         <p className="text-xs text-stone-500">
-          Run any AI task or click Verify On-Device above to inspect live{' '}
-          <code className="rounded bg-stone-100 px-1 py-0.5 text-[11px]">inferenceSource</code>, latency, and network telemetry.
+          No model has completed a run. When a route is available, responses report source, latency, and network activity.
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">

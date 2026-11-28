@@ -56,12 +56,21 @@ export function App() {
     useState<LocalModelAvailability>('unavailable');
   const [nanoImageAvailability, setNanoImageAvailability] =
     useState<LocalModelAvailability>('unavailable');
+  const [nanoChecking, setNanoChecking] = useState(true);
+  const nanoRefresh = useRef(0);
   const [nanoInitMessage, setNanoInitMessage] = useState<string | null>(null);
   const [debugSdkLogs, setDebugSdkLogs] = useState(false);
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
   const [inferenceMode, setInferenceMode] = useState<InferenceMode>(
     InferenceMode.PREFER_ON_DEVICE
   );
+  const cloudSelectable = cloudBound && isOnline && cloudAttemptStatus?.state === 'available';
+  const cloudTextSelected = inferenceMode === InferenceMode.PREFER_IN_CLOUD ||
+    inferenceMode === InferenceMode.ONLY_IN_CLOUD;
+  const canRunDeviceText = !nanoChecking && nanoAvailability === 'available';
+  const canRunDeviceImage = !nanoChecking && nanoImageAvailability === 'available';
+  const canPrepareDevice = Boolean(firebaseHandle) && !nanoChecking &&
+    (nanoAvailability === 'downloadable' || nanoAvailability === 'downloading');
   const [proposals, setProposals] = useState<TripProposal[]>([]);
   const [telemetryEntries, setTelemetryEntries] = useState<InferenceTelemetry[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -79,12 +88,17 @@ export function App() {
   );
 
   const refreshNanoAvailability = useCallback(async () => {
+    const check = ++nanoRefresh.current;
+    setNanoChecking(true);
     const [textState, imageState] = await Promise.all([
       checkOnDeviceAvailability(false),
       checkOnDeviceAvailability(true),
     ]);
-    setNanoAvailability(textState);
-    setNanoImageAvailability(imageState);
+    if (check === nanoRefresh.current) {
+      setNanoAvailability(textState);
+      setNanoImageAvailability(imageState);
+      setNanoChecking(false);
+    }
     return textState;
   }, []);
 
@@ -94,9 +108,8 @@ export function App() {
       setFirebaseHandle(handle);
       await refreshNanoAvailability();
     } catch {
-      // Keep the timeline available. A later deliberate Run attempts a fresh local session.
-      setNanoAvailability('unavailable');
-      setNanoImageAvailability('unavailable');
+      // The timeline still works if the device setup could not be checked.
+      setNanoChecking(false);
     }
   }, [refreshNanoAvailability]);
 
@@ -361,13 +374,15 @@ export function App() {
         }}
         isOnline={isOnline}
         nanoAvailability={nanoAvailability}
+        nanoChecking={nanoChecking}
+        canPrepareDevice={canPrepareDevice}
+        cloudSelectable={cloudSelectable}
         downloadPercent={downloadPercent}
         onInitializeNano={handleInitializeNano}
         inferenceMode={inferenceMode}
         onChangeInferenceMode={setInferenceMode}
         appCheckMode={firebaseHandle?.appCheckMode ?? 'unconfigured'}
         isLiveProject={cloudBound}
-        cloudAttemptStatus={cloudAttemptStatus}
         usingEmulator={Boolean(firebaseHandle?.setup.emulatorBaseUrl)}
         onOpenSetup={() => setSetupOpen(true)}
       />
@@ -440,6 +455,12 @@ export function App() {
             onSelectTab={setActiveTab}
             nanoAvailability={nanoAvailability}
             nanoImageAvailability={nanoImageAvailability}
+            nanoChecking={nanoChecking}
+            canPrepareDevice={canPrepareDevice}
+            canRunDeviceText={canRunDeviceText}
+            canRunDeviceImage={canRunDeviceImage}
+            canRunSelectedText={cloudTextSelected ? cloudSelectable : canRunDeviceText}
+            allowDeviceImageInSelectedMode={inferenceMode !== InferenceMode.ONLY_IN_CLOUD}
             downloadPercent={downloadPercent}
             nanoInitMessage={nanoInitMessage}
             debugSdkLogs={debugSdkLogs}

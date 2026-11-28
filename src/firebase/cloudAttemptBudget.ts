@@ -54,12 +54,14 @@ export function readCloudAttemptStatus(): CloudAttemptStatus {
   } catch { /* Can't prove eligibility; cloud stays closed. */ }
   return {state:'unavailable',attempts:null,limit,utcDay};
 }
-export async function reserveCloudAttempt(): Promise<void> {
+export async function reserveCloudAttempt(signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const budget=getBudget();
   if (!budget) throw new Error('REQ211_DAILY_BUDGET_UNAVAILABLE');
   let outcome:'reserved'|'spent';
   try {
-    outcome=await budget.locks.request(LOCK_NAME,{mode:'exclusive'},()=>{
+    outcome=await budget.locks.request(LOCK_NAME,{mode:'exclusive',signal},()=>{
+      signal?.throwIfAborted();
       // Read the UTC date after lock acquisition. No provider calls inside this callback.
       const current=load(budget.storage,todayUtc());
       if(current.attempts>=DAILY_CLOUD_ATTEMPT_LIMIT) return 'spent' as const;
@@ -69,6 +71,7 @@ export async function reserveCloudAttempt(): Promise<void> {
       return 'reserved' as const;
     });
   } catch {
+    signal?.throwIfAborted();
     throw new Error('REQ211_DAILY_BUDGET_UNAVAILABLE');
   }
   if(outcome==='spent')throw new Error('REQ211_DAILY_ATTEMPTS_EXHAUSTED');

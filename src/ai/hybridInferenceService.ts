@@ -175,6 +175,7 @@ export async function runHybridPrompt(
   let ttftMs: number | null = null;
   let accumulated = '';
   let blockedBeforeDispatch = false;
+  let downloadRequired = false;
   let sourceUnverified = false;
   let terminalTextMissing = false;
   let timedOut = false;
@@ -185,6 +186,10 @@ export async function runHybridPrompt(
     // (chromeAdapterFactory returns undefined, bypassing ONLY_ON_DEVICE checks inside callHybrid).
     if (effectiveMode === InferenceMode.ONLY_ON_DEVICE) {
       const localStatus = await checkOnDeviceAvailability(hasImage);
+      if (localStatus === 'downloadable' || localStatus === 'downloading') {
+        downloadRequired = true;
+        throw new Error('REQ211_NANO_DOWNLOAD_REQUIRED');
+      }
       if (localStatus !== 'available') {
         blockedBeforeDispatch = true;
         throw new Error(
@@ -300,12 +305,13 @@ export async function runHybridPrompt(
       requestedMode: effectiveMode,
       actualSource: sourceUnverified ? 'source_unverified' : blockedBeforeDispatch ? 'blocked_offline_privacy' : 'error',
       modelLabel: sourceUnverified ? 'Inference source not verified' :
+        downloadRequired ? 'Gemini Nano download required' :
         blockedBeforeDispatch ? 'Blocked before model dispatch' : 'No completed model result',
       onlineAtStart,
       appCheckMode: req.appCheckMode,
       ttftMs: null,
       totalMs,
-      estimatedCloudCostUsd: blockedBeforeDispatch ? 0 : null,
+      estimatedCloudCostUsd: blockedBeforeDispatch || downloadRequired ? 0 : null,
       inputModalities: hasImage ? ['text', 'image'] : ['text'],
       timestamp: Date.now(),
     };

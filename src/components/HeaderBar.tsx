@@ -12,7 +12,6 @@ import {
 import type { LocalModelAvailability } from '../ai/hybridInferenceService';
 import type { AppCheckMode } from '../domain/proposal';
 import type { Trip } from '../domain/trip';
-import type { CloudAttemptStatus } from '../firebase/cloudAttemptBudget';
 
 interface HeaderBarProps {
   trips: Trip[];
@@ -21,13 +20,15 @@ interface HeaderBarProps {
   onResetTrips: () => void;
   isOnline: boolean;
   nanoAvailability: LocalModelAvailability;
+  nanoChecking: boolean;
+  canPrepareDevice: boolean;
+  cloudSelectable: boolean;
   downloadPercent: number | null;
   onInitializeNano: () => void;
   inferenceMode: InferenceMode;
   onChangeInferenceMode: (mode: InferenceMode) => void;
   appCheckMode: AppCheckMode;
   isLiveProject: boolean;
-  cloudAttemptStatus?: CloudAttemptStatus | null;
   usingEmulator: boolean;
   onOpenSetup: () => void;
 }
@@ -39,23 +40,35 @@ export function HeaderBar({
   onResetTrips,
   isOnline,
   nanoAvailability,
+  nanoChecking,
+  canPrepareDevice,
+  cloudSelectable,
   downloadPercent,
   onInitializeNano,
   inferenceMode,
   onChangeInferenceMode,
   appCheckMode,
   isLiveProject,
-  cloudAttemptStatus,
   usingEmulator,
   onOpenSetup,
 }: HeaderBarProps) {
-  const cloudCanBeSelected=isLiveProject&&isOnline&&cloudAttemptStatus?.state==='available';
+  const cloudStatus = !isLiveProject
+    ? 'Cloud is locked in this demo.'
+    : cloudSelectable ? 'Cloud text requires an explicit cloud mode.'
+      : 'Cloud text is not available right now.';
+  const deviceStatus = nanoChecking ? 'Checking device support…' :
+    nanoAvailability === 'available' ? 'On-device inference is available.' :
+    nanoAvailability === 'downloadable' || nanoAvailability === 'downloading'
+      ? 'On-device inference needs setup.' : 'On-device inference is unavailable in this browser.';
   const nanoBadge = (() => {
     if (downloadPercent !== null && downloadPercent < 100) {
       return {
         label: `Downloading Nano ${downloadPercent}%`,
         className: 'bg-amber-50 text-amber-800 border-amber-200',
       };
+    }
+    if (nanoChecking) {
+      return { label: 'Checking device support…', className: 'bg-stone-100 text-stone-700 border-stone-200' };
     }
     if (nanoAvailability === 'available') {
       return {
@@ -102,6 +115,9 @@ export function HeaderBar({
             <p className="text-xs text-stone-500">
               On-device Chrome Gemini Nano + gated cloud text + deterministic schedule verification
             </p>
+            <p className="mt-1 text-xs font-medium text-stone-700" role="status">
+              {deviceStatus} {cloudStatus} Itinerary editing works offline.
+            </p>
           </div>
         </div>
 
@@ -112,7 +128,7 @@ export function HeaderBar({
               data-testid="trip-selector"
               value={activeTripId}
               onChange={(e) => onSelectTrip(e.target.value)}
-              className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-stone-800 outline-none"
+              className="trip-native-select rounded-md bg-white px-2.5 py-1 text-xs font-medium text-stone-800 outline-none"
             >
               {trips.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -154,7 +170,7 @@ export function HeaderBar({
             <button
               type="button"
               data-testid="init-nano-btn"
-              disabled={downloadPercent !== null && downloadPercent < 100}
+              disabled={!canPrepareDevice || downloadPercent !== null && downloadPercent < 100}
               onClick={onInitializeNano}
               className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
             >
@@ -185,12 +201,12 @@ export function HeaderBar({
               data-testid="inference-mode-select"
               value={inferenceMode}
               onChange={(e) => onChangeInferenceMode(e.target.value as InferenceMode)}
-              className="bg-transparent font-semibold text-stone-900 outline-none"
+              className="trip-native-select bg-transparent font-semibold text-stone-900 outline-none"
             >
               <option value={InferenceMode.PREFER_ON_DEVICE}>PREFER_ON_DEVICE</option>
               <option value={InferenceMode.ONLY_ON_DEVICE}>ONLY_ON_DEVICE</option>
-              <option value={InferenceMode.PREFER_IN_CLOUD} disabled={!cloudCanBeSelected}>PREFER_IN_CLOUD</option>
-              <option value={InferenceMode.ONLY_IN_CLOUD} disabled={!cloudCanBeSelected}>ONLY_IN_CLOUD</option>
+              <option value={InferenceMode.PREFER_IN_CLOUD} disabled={!cloudSelectable}>PREFER_IN_CLOUD</option>
+              <option value={InferenceMode.ONLY_IN_CLOUD} disabled={!cloudSelectable}>ONLY_IN_CLOUD</option>
             </select>
           </label>
 

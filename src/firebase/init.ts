@@ -101,11 +101,26 @@ export async function createCompetitionRuntime(
         }
       };
       checkIdentity();
+      const interrupted = () => new Error('REQ211_CLOUD_INTERRUPTED');
+      const controller = new AbortController();
+      let disconnected = false;
+      const onDisconnect = () => {
+        disconnected = true;
+        controller.abort();
+      };
+      const checkConnected = () => {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) onDisconnect();
+        if (disconnected) throw interrupted();
+      };
+      const host = typeof window === 'undefined' ? undefined : window;
       cloudBusy = true;
+      host?.addEventListener('offline', onDisconnect);
       try {
         // Spend before initializing App Check, obtaining a token, or running a model.
-        // An admitted failure counts; no refund/retry loop.
-        await reserveCloudAttempt();
+        // Cancel a pending lock before admission; admitted failures still count.
+        checkConnected();
+        await reserveCloudAttempt(controller.signal);
+        checkConnected();
         checkIdentity();
         if (!authenticated) {
           try {
@@ -120,13 +135,24 @@ export async function createCompetitionRuntime(
         const {appCheck,ai:approvedAi}=authenticated;
         if(appCheck.app!==app || approvedAi.app!==app) throw new Error('REQ211_APP_IDENTITY_CHANGED');
         const token = await sameAppToken(appCheck);
+        checkConnected();
         checkIdentity();
-        const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 25_000);
         try {
-          return await withCompetitionPermit(locked, token, prompt, () => run(approvedAi, controller.signal));
+          const result = await withCompetitionPermit(locked, token, prompt, () => {
+            checkConnected();
+            return run(approvedAi, controller.signal);
+          });
+          checkConnected();
+          return result;
         } finally { clearTimeout(timer); }
-      } finally { cloudBusy = false; }
+      } catch (error) {
+        if (disconnected) throw interrupted();
+        throw error;
+      } finally {
+        host?.removeEventListener('offline', onDisconnect);
+        cloudBusy = false;
+      }
     },
   };
 }

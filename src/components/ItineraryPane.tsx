@@ -133,7 +133,7 @@ export function ItineraryPane({
               aria-label="Trip day of week"
               value={trip.dayOfWeek}
               onChange={(e) => onChangeDayOfWeek(e.target.value as DayOfWeek)}
-              className="bg-transparent font-semibold text-stone-800 outline-none"
+              className="trip-native-select bg-transparent font-semibold text-stone-800 outline-none"
             >
               {DAYS.map((d) => (
                 <option key={d} value={d}>

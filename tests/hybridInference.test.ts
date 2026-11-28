@@ -241,4 +241,57 @@ describe('Firebase AI Logic Hybrid Inference SDK Contract', () => {
     ).rejects.toThrow('REQ211_UNSUPPORTED_IMAGE_MIME');
     expect(emulator.getRequests()).toHaveLength(0);
   });
+
+  it('reports download-required instead of Privacy Shield block when ONLY_ON_DEVICE sees downloadable model', async () => {
+    const g = globalThis as Record<string, unknown>;
+    g.LanguageModel = {
+      async availability() {
+        return 'downloadable';
+      },
+    };
+    let caught: (Error & { telemetry?: { actualSource?: string; modelLabel?: string } }) | undefined;
+    try {
+      await runHybridPrompt(
+        {
+          ai,
+          taskKind: 'concierge',
+          requestedMode: InferenceMode.ONLY_ON_DEVICE,
+          cloudModel: 'gemini-3.5-flash-lite',
+          emulatorBaseUrl: emulator.url,
+          appCheckMode: 'local_emulator_provider',
+          prompt: 'Summarize stops',
+        },
+        () => {}
+      );
+    } catch (e) {
+      caught = e as Error & { telemetry?: { actualSource?: string; modelLabel?: string } };
+    }
+    expect(caught?.message).toBe('REQ211_NANO_DOWNLOAD_REQUIRED');
+    expect(caught?.telemetry?.actualSource).toBe('error');
+    expect(caught?.telemetry?.modelLabel).toBe('Gemini Nano download required');
+    expect(emulator.getRequests()).toHaveLength(0);
+  });
+
+  it('still blocks via Privacy Shield when ONLY_ON_DEVICE sees unavailable model', async () => {
+    installMockLanguageModel('unavailable');
+    let caught: (Error & { telemetry?: { actualSource?: string } }) | undefined;
+    try {
+      await runHybridPrompt(
+        {
+          ai,
+          taskKind: 'privacy_vault',
+          requestedMode: InferenceMode.PREFER_ON_DEVICE,
+          cloudModel: 'gemini-3.5-flash-lite',
+          emulatorBaseUrl: emulator.url,
+          appCheckMode: 'local_emulator_provider',
+          prompt: 'Private note',
+        },
+        () => {}
+      );
+    } catch (e) {
+      caught = e as Error & { telemetry?: { actualSource?: string } };
+    }
+    expect(caught?.telemetry?.actualSource).toBe('blocked_offline_privacy');
+    expect(emulator.getRequests()).toHaveLength(0);
+  });
 });
