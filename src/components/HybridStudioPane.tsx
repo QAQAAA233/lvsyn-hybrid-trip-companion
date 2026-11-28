@@ -1,23 +1,28 @@
 import { useState } from 'react';
-import { InferenceSource } from 'firebase/ai';
 import {
+  ArrowRight,
+  Ban,
   Camera,
   Check,
   Cloud,
-  Clock,
   Cpu,
   Download,
+  ImageIcon,
+  Layers,
   Lock,
   RefreshCw,
   Send,
-  ShieldAlert,
   Sparkles,
+  Upload,
+  Wifi,
+  WifiOff,
   Wrench,
   X,
 } from 'lucide-react';
 import type { LocalModelAvailability } from '../ai/hybridInferenceService';
 import { stripJsonBlocksForDisplay, type TaskKind, type TripProposal } from '../domain/proposal';
 import { formatMinutes, type Trip } from '../domain/trip';
+import { describeProposalSource, type RouteState, type Tone } from './sourcePresentation';
 
 interface HybridStudioPaneProps {
   trip: Trip;
@@ -132,18 +137,18 @@ export function HybridStudioPane({
 }: HybridStudioPaneProps) {
   const [conciergeInput, setConciergeInput] = useState(CONCIERGE_PROMPTS[0]);
   const [privacyInput, setPrivacyInput] = useState(
-    'Generate a calm private care & medication checklist synchronized with today’s stops.'
+    'Draft a gentle reminder note using my private mobility and room PIN notes.'
   );
   const [visionInput, setVisionInput] = useState(SAMPLE_SIGNS[0].prompt);
-  const [optimizerInput, setOptimizerInput] = useState(
-    'Resolve every closed-day or deadline conflict while keeping walking burden low for seniors.'
-  );
   const [selectedImage, setSelectedImage] = useState<{
     base64Data: string;
     mimeType: 'image/png' | 'image/jpeg';
     previewUrl: string;
     label: string;
   } | null>(null);
+  const [optimizerInput, setOptimizerInput] = useState(
+    'Resolve any venue conflicts or overrun stops so we arrive comfortably before our return train.'
+  );
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -195,120 +200,128 @@ export function HybridStudioPane({
     },
   ];
 
+  const tabTone: Record<TaskKind, Tone> = {
+    concierge: 'cloud',
+    privacy_vault: 'device',
+    sign_vision: 'neutral',
+    schedule_optimize: 'ok',
+  };
+  const latest = proposals[0];
+  const downloading = downloadPercent !== null && downloadPercent < 100;
+
   return (
-    <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-4 shadow-xs sm:p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-3">
+    <section className="card flex flex-col gap-5 p-4 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-bold text-stone-900">
+          <p className="kicker">Firebase AI Logic · Hybrid inference</p>
+          <h2 className="mt-1 font-display text-title font-bold tracking-tight text-ink sm:text-display">
             Hybrid AI Studio &amp; Verification
           </h2>
-          <p className="text-xs text-stone-500">
-            Completed model responses show a verified source. Mode selection is explicit;
-            a local preference does not fall back to cloud.
+          <p className="mt-1 text-body text-ink-3">
+            Completed model responses show a verified{' '}
+            <code className="rounded bg-surface-2 px-1.5 py-0.5 text-meta text-ink-2">inferenceSource</code>.
+            Mode selection is explicit; a local preference does not fall back to cloud.
           </p>
         </div>
-        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-[11px] font-medium text-stone-700">
+        <label className="chip tone-neutral cursor-pointer min-h-8 px-3">
           <input
             type="checkbox"
             data-testid="debug-logs-toggle"
             checked={debugSdkLogs}
             onChange={(e) => onToggleDebugSdkLogs(e.target.checked)}
+            className="h-3.5 w-3.5 accent-[var(--color-device)]"
           />
           Debug SDK Logs
         </label>
       </div>
 
       {/* On-Device Proof & Control Strip */}
-      <div
-        data-testid="on-device-proof-panel"
-        className="space-y-2 rounded-xl border border-stone-200 bg-stone-50/70 px-3 py-2.5 text-xs"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-700">
-            <span className="font-semibold text-stone-900">LanguageModel.availability():</span>
-            <code
-              data-testid="nano-text-availability"
-              className={`rounded px-1.5 py-0.5 font-semibold ${
-                nanoAvailability === 'available'
-                  ? 'bg-emerald-100 text-emerald-900'
-                  : 'bg-stone-200 text-stone-800'
-              }`}
-            >
-              text: {nanoChecking ? 'checking' : nanoAvailability}
-            </code>
-            <code
-              data-testid="nano-image-availability"
-              className={`rounded px-1.5 py-0.5 font-semibold ${
-                nanoImageAvailability === 'available'
-                  ? 'bg-emerald-100 text-emerald-900'
-                  : 'bg-stone-200 text-stone-800'
-              }`}
-            >
-              image: {nanoChecking ? 'checking' : nanoImageAvailability}
-            </code>
-          </div>
+      <div data-testid="on-device-proof-panel" className="panel overflow-hidden">
+        <HybridRouteStrip latest={latest} />
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              data-testid="refresh-nano-btn"
-              onClick={onRefreshNano}
-              className="inline-flex items-center gap-1 rounded-lg border border-stone-300 bg-white px-2 py-1 text-[11px] font-semibold text-stone-700 hover:bg-stone-100"
-            >
-              <RefreshCw className="h-3 w-3" />
-              Refresh
-            </button>
-            {nanoAvailability !== 'available' && (
+        <div className="flex flex-col gap-3 border-t border-line bg-surface px-3.5 py-3 sm:px-4">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-2 text-meta text-ink-2">
+              <span className="font-mono font-semibold text-ink">LanguageModel.availability()</span>
+              <code
+                data-testid="nano-text-availability"
+                className={`chip font-mono ${nanoAvailability === 'available' ? 'tone-device' : 'tone-neutral'}`}
+              >
+                <span className="dot" />
+                text: {nanoChecking ? 'checking' : nanoAvailability}
+              </code>
+              <code
+                data-testid="nano-image-availability"
+                className={`chip font-mono ${nanoImageAvailability === 'available' ? 'tone-device' : 'tone-neutral'}`}
+              >
+                <span className="dot" />
+                image: {nanoChecking ? 'checking' : nanoImageAvailability}
+              </code>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
-                data-testid="studio-init-nano-btn"
-                disabled={!canPrepareDevice || downloadPercent !== null && downloadPercent < 100}
-                onClick={onInitializeNano}
-                className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                data-testid="refresh-nano-btn"
+                onClick={onRefreshNano}
+                className="btn btn-outline"
               >
-                <Download className="h-3 w-3" />
-                {downloadPercent !== null && downloadPercent < 100
-                  ? `Downloading ${downloadPercent}%`
-                  : 'Enable On-Device AI'}
+                <RefreshCw className="h-3.5 w-3.5" />
+                Refresh
               </button>
-            )}
-            <button
-              type="button"
-              data-testid="verify-on-device-btn"
-              disabled={isRunning || !canRunDeviceText}
-              aria-describedby="device-readiness-guidance"
-              onClick={onVerifyOnDevice}
-              className="inline-flex items-center gap-1 rounded-lg border border-emerald-600 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
-            >
-              <Cpu className="h-3 w-3" />
-              Verify On-Device (ONLY_ON_DEVICE)
-            </button>
+              {nanoAvailability !== 'available' && (
+                <button
+                  type="button"
+                  data-testid="studio-init-nano-btn"
+                  disabled={!canPrepareDevice || downloading}
+                  onClick={onInitializeNano}
+                  className="btn btn-outline-device"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {downloading
+                    ? `Downloading ${downloadPercent}%`
+                    : 'Enable On-Device AI'}
+                </button>
+              )}
+              <button
+                type="button"
+                data-testid="verify-on-device-btn"
+                disabled={isRunning || !canRunDeviceText}
+                aria-describedby="device-readiness-guidance"
+                onClick={onVerifyOnDevice}
+                className="btn btn-device"
+              >
+                <Cpu className="h-3.5 w-3.5" />
+                Verify On-Device (ONLY_ON_DEVICE)
+              </button>
+            </div>
           </div>
-        </div>
 
-        <p id="device-readiness-guidance" className="text-[11px] text-stone-700">
-          {nanoChecking ? 'Checking device support; no model has been run by this check.'
-            : !canRunDeviceText && canPrepareDevice ? 'Gemini Nano is downloadable on this browser. Click "Enable On-Device AI" to download the on-device model (no flags needed), or switch Mode to cloud if configured.'
-              : !canRunDeviceText ? 'On-device text is not available. Refresh after changing browser support. The itinerary remains editable.'
-                : !canRunDeviceImage ? 'On-device text is ready. Sign images need separate on-device support.'
-                  : 'On-device text and image are ready. Verification requires a completed response.'}
-        </p>
-        {!nanoChecking && nanoAvailability === 'unavailable' && (
-          <p className="text-[11px] text-stone-500 [overflow-wrap:anywhere]">
-            Desktop Chrome 139+ required · Enable{' '}
-            <code>chrome://flags/#prompt-api-for-gemini-nano-multimodal-input</code> &amp; check{' '}
-            <code>chrome://on-device-internals</code>.
+          <p id="device-readiness-guidance" className="text-meta text-ink-2">
+            {nanoChecking ? 'Checking device support; no model has been run by this check.'
+              : !canRunDeviceText && canPrepareDevice ? 'Gemini Nano is downloadable on this browser. Click "Enable On-Device AI" to download the on-device model (no flags needed), or switch Mode to cloud if configured.'
+                : !canRunDeviceText ? 'On-device text is not available. Refresh after changing browser support. The itinerary remains editable.'
+                  : !canRunDeviceImage ? 'On-device text is ready. Sign images need separate on-device support.'
+                    : 'On-device text and image are ready. Verification requires a completed response.'}
           </p>
-        )}
-        {nanoInitMessage && (
-          <p data-testid="nano-init-message" className="text-[11px] font-medium text-stone-700">
-            {nanoInitMessage}
-          </p>
-        )}
+
+          {!nanoChecking && nanoAvailability === 'unavailable' && (
+            <p className="text-meta text-ink-3 [overflow-wrap:anywhere]">
+              Desktop Chrome 139+ required · Enable{' '}
+              <code>chrome://flags/#prompt-api-for-gemini-nano-multimodal-input</code> &amp; check{' '}
+              <code>chrome://on-device-internals</code>.
+            </p>
+          )}
+          {nanoInitMessage && (
+            <p data-testid="nano-init-message" className="text-meta font-medium text-ink-2">
+              {nanoInitMessage}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Mode Tabs */}
-      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="tablist">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="tablist">
         {tabs.map((tab) => {
           const active = activeTab === tab.id;
           return (
@@ -319,17 +332,19 @@ export function HybridStudioPane({
               aria-selected={active}
               data-testid={`tab-${tab.id}`}
               onClick={() => onSelectTab(tab.id)}
-              className={`flex flex-col items-start gap-0.5 rounded-xl border px-3 py-2 text-left transition ${
+              className={`flex flex-col items-start gap-1.5 rounded-[var(--radius-panel)] border px-3.5 py-3 text-left transition ${
                 active
-                  ? 'border-emerald-500 bg-emerald-50/70 text-emerald-950'
-                  : 'border-stone-200 bg-stone-50/60 text-stone-700 hover:bg-stone-100'
+                  ? 'border-ink bg-ink text-white shadow-[var(--shadow-raised)]'
+                  : 'border-line bg-surface text-ink-2 hover:border-line-strong hover:bg-surface-2'
               }`}
             >
-              <div className="flex items-center gap-1.5 text-xs font-bold">
+              <div className="flex items-center gap-1.5 text-body font-bold">
                 {tab.icon}
                 <span>{tab.label}</span>
               </div>
-              <span className="text-[10px] font-medium text-stone-500">{tab.badge}</span>
+              <span className={`chip min-h-5 py-0 text-[0.6875rem] ${active ? 'border-white/20 bg-white/10 text-white' : `tone-${tabTone[tab.id]}`}`}>
+                {tab.badge}
+              </span>
             </button>
           );
         })}
@@ -337,14 +352,15 @@ export function HybridStudioPane({
 
       {/* Active Tab Controls */}
       {activeTab === 'concierge' && (
-        <div className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/70 p-3.5">
+        <div className="panel space-y-3 p-3.5 sm:p-4">
           <div className="flex flex-wrap gap-1.5">
             {CONCIERGE_PROMPTS.map((preset) => (
               <button
                 key={preset}
                 type="button"
                 onClick={() => setConciergeInput(preset)}
-                className="rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-medium text-stone-700 transition hover:border-emerald-400 hover:text-emerald-800"
+                className={`chip min-h-8 px-3 text-left whitespace-normal transition hover:border-device-line hover:text-device-strong ${
+                  conciergeInput === preset ? 'tone-device' : 'tone-neutral bg-surface'}`}
               >
                 {preset}
               </button>
@@ -356,13 +372,13 @@ export function HybridStudioPane({
             value={conciergeInput}
             onChange={(e) => setConciergeInput(e.target.value)}
             placeholder="Ask about your trip on this device; cloud requires an explicit mode selection."
-            className="w-full rounded-lg border border-stone-300 bg-white p-2.5 text-xs text-stone-900 outline-none focus:border-emerald-500"
+            className="field resize-y"
           />
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] text-stone-500">
-              <span id="selected-route-guidance">{canRunSelectedText
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span id="selected-route-guidance" className="text-meta text-ink-3">
+              {canRunSelectedText
                 ? 'Uses the selected mode.'
-                : 'No available route for the selected mode. Edit and check the itinerary without a model.'}</span>
+                : 'No available route for the selected mode. Edit and check the itinerary without a model.'}
             </span>
             <button
               type="button"
@@ -372,9 +388,9 @@ export function HybridStudioPane({
               onClick={() =>
                 onRunTask({ taskKind: 'concierge', userPrompt: conciergeInput.trim() })
               }
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+              className="btn btn-primary min-h-10 px-4"
             >
-              <Send className="h-3.5 w-3.5" />
+              <Send className="h-4 w-4" />
               {isRunning ? 'Running...' : 'Run Hybrid Concierge'}
             </button>
           </div>
@@ -382,27 +398,29 @@ export function HybridStudioPane({
       )}
 
       {activeTab === 'privacy_vault' && (
-        <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5">
-          <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs text-emerald-900">
-            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+        <div className="space-y-3 rounded-[var(--radius-panel)] border border-device-line bg-device-soft/60 p-3.5 sm:p-4">
+          <div className="flex items-start gap-3 rounded-[var(--radius-control)] border border-device-line bg-surface px-3.5 py-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-device text-white">
+              <Lock className="h-4 w-4" />
+            </span>
             <div>
-              <p className="font-bold">Strict On-Device Privacy Shield (ONLY_ON_DEVICE)</p>
-              <p className="text-[11px] text-stone-600">
+              <p className="text-body font-bold text-device-strong">Strict On-Device Privacy Shield (ONLY_ON_DEVICE)</p>
+              <p className="mt-0.5 text-meta text-ink-3">
                 Forces <code>InferenceMode.ONLY_ON_DEVICE</code>. If Gemini Nano is unavailable,
-                execution aborts locally with <strong>0 bytes</strong> sent to cloud servers.
+                execution aborts locally with <strong className="text-ink">0 bytes</strong> sent to cloud servers.
               </p>
             </div>
           </div>
 
           <div>
-            <label className="mb-1 block text-[11px] font-semibold text-stone-700">
+            <label className="mb-1.5 block text-meta font-semibold text-ink-2">
               Private Medical / Mobility / Room PIN Notes (never uploaded)
             </label>
             <textarea
               rows={2}
               value={trip.privateNotes}
               onChange={(e) => onUpdatePrivateNotes(e.target.value)}
-              className="w-full rounded-lg border border-stone-300 bg-white p-2.5 text-xs text-stone-900 outline-none focus:border-emerald-500"
+              className="field resize-y"
             />
           </div>
 
@@ -411,7 +429,7 @@ export function HybridStudioPane({
               type="text"
               value={privacyInput}
               onChange={(e) => setPrivacyInput(e.target.value)}
-              className="min-w-0 basis-48 flex-1 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs"
+              className="field min-w-[200px] flex-1"
             />
             <button
               type="button"
@@ -421,9 +439,9 @@ export function HybridStudioPane({
               onClick={() =>
                 onRunTask({ taskKind: 'privacy_vault', userPrompt: privacyInput.trim() })
               }
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:opacity-50"
+              className="btn btn-device min-h-10 px-4"
             >
-              <Lock className="h-3.5 w-3.5" />
+              <Lock className="h-4 w-4" />
               {isRunning ? 'Running...' : 'Run Locally Only'}
             </button>
           </div>
@@ -431,7 +449,7 @@ export function HybridStudioPane({
       )}
 
       {activeTab === 'sign_vision' && (
-        <div className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/70 p-3.5">
+        <div className="panel space-y-3 p-3.5 sm:p-4">
           <div className="flex flex-wrap items-center gap-2">
             {SAMPLE_SIGNS.map((sample) => (
               <button
@@ -439,12 +457,14 @@ export function HybridStudioPane({
                 type="button"
                 data-testid={`sample-${sample.id}`}
                 onClick={() => handlePickSampleSign(sample)}
-                className="rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-700 transition hover:border-emerald-500 hover:text-emerald-800"
+                className={`btn ${selectedImage?.label === sample.label ? 'btn-outline-device' : 'btn-outline'}`}
               >
+                <ImageIcon className="h-3.5 w-3.5" />
                 Use {sample.label}
               </button>
             ))}
-            <label className="cursor-pointer rounded-lg border border-dashed border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:border-emerald-500">
+            <label className="btn btn-outline cursor-pointer border-dashed">
+              <Upload className="h-3.5 w-3.5" />
               Upload PNG / JPEG
               <input
                 type="file"
@@ -456,32 +476,33 @@ export function HybridStudioPane({
           </div>
 
           {selectedImage && (
-            <div className="flex items-center gap-3 rounded-lg border border-stone-200 bg-white p-2">
+            <div className="flex items-center gap-3 rounded-[var(--radius-control)] border border-line bg-surface p-2.5">
               <img
                 src={selectedImage.previewUrl}
                 alt={selectedImage.label}
-                className="h-16 w-24 rounded border border-stone-200 object-cover"
+                className="h-16 w-24 rounded-lg border border-line object-cover"
               />
-              <div className="text-xs">
-                <p className="font-semibold text-stone-800">{selectedImage.label}</p>
-                <p className="text-[11px] text-stone-500">
+              <div className="text-meta">
+                <p className="text-body font-semibold text-ink">{selectedImage.label}</p>
+                <p className="text-ink-3">
                   Attached as multimodal <code>inlineData</code> ({selectedImage.mimeType})
                 </p>
               </div>
             </div>
           )}
 
-          <p id="sign-route-guidance" className="text-[11px] text-stone-700">
+          <p id="sign-route-guidance" className="text-meta text-ink-2">
             {!allowDeviceImageInSelectedMode
               ? 'Images stay on device. Select a mode that allows on-device inference.'
               : canRunDeviceImage ? 'Images run on this device only.' : 'On-device image inference is not available in this browser.'}
           </p>
+
           <div className="flex flex-wrap items-center justify-between gap-2">
             <input
               type="text"
               value={visionInput}
               onChange={(e) => setVisionInput(e.target.value)}
-              className="min-w-0 basis-48 flex-1 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs"
+              className="field min-w-[200px] flex-1"
             />
             <button
               type="button"
@@ -496,9 +517,9 @@ export function HybridStudioPane({
                   imageAttachment: selectedImage,
                 });
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+              className="btn btn-primary min-h-10 px-4"
             >
-              <Camera className="h-3.5 w-3.5" />
+              <Camera className="h-4 w-4" />
               {isRunning ? 'Analyzing...' : 'Analyze Sign Image'}
             </button>
           </div>
@@ -506,20 +527,20 @@ export function HybridStudioPane({
       )}
 
       {activeTab === 'schedule_optimize' && (
-        <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/40 p-3.5">
-          <p className="text-xs text-stone-700">
+        <div className="panel space-y-3 p-3.5 sm:p-4">
+          <p className="text-body text-ink-2">
             AI proposes structured <code>patchOps</code>; the deterministic schedule engine previews
             exact arrival times &amp; conflict resolution before you click <strong>Keep</strong> or{' '}
             <strong>Discard</strong>.
           </p>
-          <p id="optimizer-route-guidance" className="text-[11px] text-stone-700">
+          <p id="optimizer-route-guidance" className="text-meta text-ink-2">
             {canRunSelectedText ? 'Uses the selected mode.' : 'No available route for the selected mode. You can edit and check the schedule without a model.'}
           </p>
           <textarea
             rows={2}
             value={optimizerInput}
             onChange={(e) => setOptimizerInput(e.target.value)}
-            className="w-full rounded-lg border border-stone-300 bg-white p-2.5 text-xs text-stone-900 outline-none focus:border-blue-500"
+            className="field resize-y"
           />
           <div className="flex justify-end">
             <button
@@ -530,9 +551,9 @@ export function HybridStudioPane({
               onClick={() =>
                 onRunTask({ taskKind: 'schedule_optimize', userPrompt: optimizerInput.trim() })
               }
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+              className="btn btn-primary min-h-10 px-4"
             >
-              <Wrench className="h-3.5 w-3.5" />
+              <Wrench className="h-4 w-4" />
               {isRunning ? 'Optimizing...' : 'Fix Conflicts & Catch Return Train'}
             </button>
           </div>
@@ -542,62 +563,25 @@ export function HybridStudioPane({
       {/* Proposal Cards Feed */}
       <div className="space-y-3" data-testid="proposal-feed">
         {proposals.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-stone-200 p-6 text-center text-xs text-stone-500">
-            Run a task to see where the model actually ran. The timeline remains editable
-            on this device without AI or cloud access.
+          <div className="flex flex-col items-center gap-2 rounded-[var(--radius-panel)] border border-dashed border-line-strong px-6 py-8 text-center">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-2 text-ink-3">
+              <Sparkles className="h-5 w-5" />
+            </span>
+            <p className="max-w-sm text-body text-ink-3">
+              Run a task to see where the model actually ran. The timeline remains editable
+              on this device without AI or cloud access.
+            </p>
           </div>
         ) : (
           proposals.map((p) => {
-            const source = p.telemetry.actualSource;
-            const completedBySdk = p.telemetry.sourceEvidence === 'sdk_terminal_response' && Boolean(p.responseText.trim());
-            const isOnDevice = completedBySdk && source === InferenceSource.ON_DEVICE;
-            const isCloud = completedBySdk && source === InferenceSource.IN_CLOUD;
-            const isEmulator = completedBySdk && source === 'local_emulator';
-            const isBlocked = source === 'blocked_offline_privacy';
+            const view = describeProposalSource(p);
+            const isBlocked = view.route === 'blocked';
             const isError = p.status === 'error';
-            const sourceBadge = (() => {
-              if (p.status === 'streaming') return {
-                label: 'RUNNING · Source not yet confirmed',
-                cls: 'border-stone-300 bg-stone-100 text-stone-900',
-                icon: <Clock className="h-3.5 w-3.5" />,
-              };
-              if (source === 'source_unverified') return {
-                label: 'SOURCE UNVERIFIED · Result not used',
-                cls: 'border-amber-300 bg-amber-100 text-amber-900',
-                icon: <ShieldAlert className="h-3.5 w-3.5" />,
-              };
-              if (isBlocked) return {
-                label: 'BLOCKED BEFORE DISPATCH · Privacy Shield (0 bytes sent)',
-                cls: 'border-amber-300 bg-amber-100 text-amber-900',
-                icon: <ShieldAlert className="h-3.5 w-3.5" />,
-              };
-              if (isError) return {
-                label: 'NO COMPLETED MODEL RESULT',
-                cls: 'border-rose-300 bg-rose-100 text-rose-900',
-                icon: <X className="h-3.5 w-3.5" />,
-              };
-              if (isOnDevice) return {
-                label: 'ON-DEVICE · inferenceSource: "on_device"',
-                cls: 'border-emerald-300 bg-emerald-100 text-emerald-900',
-                icon: <Cpu className="h-3.5 w-3.5" />,
-              };
-              if (isEmulator) return {
-                label: 'LOCAL EMULATOR · inferenceSource: "local_emulator"',
-                cls: 'border-stone-300 bg-stone-100 text-stone-900',
-                icon: <Cpu className="h-3.5 w-3.5" />,
-              };
-              return {
-                label: isCloud ? 'IN-CLOUD · inferenceSource: "in_cloud"' : 'SOURCE UNVERIFIED · Result not used',
-                cls: isCloud ? 'border-blue-300 bg-blue-100 text-blue-900' :
-                  'border-amber-300 bg-amber-100 text-amber-900',
-                icon: isCloud ? <Cloud className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />,
-              };
-            })();
             const recoveryByCode = new Map<string, string>(Object.entries({
-                             REQ211_DAILY_ATTEMPTS_EXHAUSTED: 'The local daily cloud allowance is used. No App Check or model request was started. Use the local timeline.',
-               REQ211_DAILY_BUDGET_UNAVAILABLE: 'The app cannot verify a persistent local attempt count. Cloud was not started. Use the local timeline.',
-               REQ211_CLOUD_BUSY: 'A cloud request is already in progress. No duplicate cloud request or automatic retry was started.',
-               REQ211_CLOUD_QUOTA_STOP: 'Cloud quota was unavailable. This request was not retried.',
+              REQ211_DAILY_ATTEMPTS_EXHAUSTED: 'The local daily cloud allowance is used. No App Check or model request was started. Use the local timeline.',
+              REQ211_DAILY_BUDGET_UNAVAILABLE: 'The app cannot verify a persistent local attempt count. Cloud was not started. Use the local timeline.',
+              REQ211_CLOUD_BUSY: 'A cloud request is already in progress. No duplicate cloud request or automatic retry was started.',
+              REQ211_CLOUD_QUOTA_STOP: 'Cloud quota was unavailable. This request was not retried.',
               REQ211_CLOUD_OFFLINE_STOP: 'This device is offline. No cloud request was started.',
               REQ211_APP_CHECK_UNAVAILABLE: 'Approved cloud access is unavailable in this build.',
               REQ211_CLOUD_PERMISSION_STOP: 'Cloud access was denied. This request was not retried.',
@@ -614,50 +598,53 @@ export function HybridStudioPane({
                 'The AI request stopped without a completed result.');
 
             const cleanBody = stripJsonBlocksForDisplay(p.responseText);
-            const mayApply = (isOnDevice || isCloud || isEmulator) && Boolean(p.responseText.trim());
+            const mayApply = view.confirmed && Boolean(p.responseText.trim());
+            const finished = !isError && p.status !== 'streaming';
+            const sourceClaim = finished && view.route === 'device' ? 'Local inference' :
+              finished && view.route === 'cloud' ? 'Cloud inference' :
+              finished && view.route === 'emulator' ? 'Emulated response' : 'No source claim';
+            const accent = view.tone === 'device' ? 'border-l-device' : view.tone === 'cloud' ? 'border-l-cloud' :
+              view.tone === 'guard' ? 'border-l-guard' : view.tone === 'danger' ? 'border-l-danger' : 'border-l-line-strong';
 
             return (
               <article
                 key={p.id}
                 data-testid={`proposal-card-${p.kind}`}
-                className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs"
+                className={`rounded-[var(--radius-panel)] border border-line border-l-4 ${accent} bg-surface p-3.5 shadow-[var(--shadow-raised)] sm:p-4`}
               >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-2">
-                  <span
-                    data-testid="proposal-source-badge"
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${sourceBadge.cls}`}
-                  >
-                    {sourceBadge.icon}
-                    {sourceBadge.label}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span data-testid="proposal-source-badge" className={`chip tone-${view.tone} whitespace-normal`}>
+                    {view.icon}
+                    {view.label}
                   </span>
 
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-500 tabular-nums">
-                    <span>{p.telemetry.onlineAtStart ? 'Online' : 'Offline'}</span>
-                    <span>·</span>
-                    <span>
-                      TTFT {p.telemetry.ttftMs !== null ? `${p.telemetry.ttftMs}ms` : '—'}
+                  <div className="flex flex-wrap items-center gap-1.5 text-meta tabular-nums">
+                    <span className="chip tone-neutral min-h-6 py-0">
+                      {p.telemetry.onlineAtStart ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                      {p.telemetry.onlineAtStart ? 'Online' : 'Offline'}
                     </span>
-                    <span>·</span>
-                    <span>Total {p.telemetry.totalMs}ms</span>
-                    <span>·</span>
-                    <span className="font-semibold text-stone-700">
-                      {!isError && p.status !== 'streaming' && isOnDevice ? 'Local inference' :
-                        !isError && p.status !== 'streaming' && isCloud ? 'Cloud inference' :
-                        !isError && p.status !== 'streaming' && isEmulator ? 'Emulated response' : 'No source claim'}
+                    <span className="chip tone-neutral min-h-6 py-0">
+                      <span className="text-ink-3">TTFT</span>
+                      {p.telemetry.ttftMs !== null ? `${p.telemetry.ttftMs}ms` : '—'}
                     </span>
+                    <span className="chip tone-neutral min-h-6 py-0">
+                      <span className="text-ink-3">Total</span>
+                      {p.telemetry.totalMs}ms
+                    </span>
+                    <span className="pl-1 font-semibold text-ink-2">{sourceClaim}</span>
                   </div>
                 </div>
 
                 {p.status === 'error' ? (
-                  <div className="mt-2.5 space-y-1 text-xs text-stone-700" role="status">
-                    <p className="font-medium text-rose-800">{recoveryText}</p>
-                    <p>No changes from this request were applied.</p>
-                    <a href="#local-itinerary" className="inline-flex min-h-11 items-center font-semibold text-emerald-800 underline">
+                  <div className="mt-3 space-y-1 text-body text-ink-2" role="status">
+                    <p className={`font-semibold ${isBlocked ? 'text-guard-strong' : 'text-danger-strong'}`}>{recoveryText}</p>
+                    <p className="text-ink-3">No changes from this request were applied.</p>
+                    <a href="#local-itinerary" className="inline-flex min-h-11 items-center gap-1 font-semibold text-device-strong underline decoration-device-line underline-offset-4 hover:decoration-device">
                       Continue in the local timeline
                     </a>
                   </div>
                 ) : (
-                  <div className="mt-2.5 whitespace-pre-wrap text-xs leading-relaxed text-stone-800">
+                  <div className="mt-3 whitespace-pre-wrap text-body leading-relaxed text-ink">
                     {cleanBody || (p.status === 'streaming' ? 'Streaming response...' : '')}
                   </div>
                 )}
@@ -665,65 +652,63 @@ export function HybridStudioPane({
                 {mayApply && p.patchOps.length > 0 && p.diffSummary && (
                   <div
                     data-testid="deterministic-diff-card"
-                    className="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-3 text-xs"
+                    className="mt-3.5 rounded-[var(--radius-control)] border border-line bg-surface-2 p-3.5"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-bold text-stone-900">
+                      <span className="text-body font-bold text-ink">
                         Deterministic Verification Preview ({p.patchOps.length} patch ops)
                       </span>
-                      <span className="font-semibold tabular-nums text-emerald-700">
-                        Conflicts: {p.diffSummary.beforeErrors} → {p.diffSummary.afterErrors} ·
-                        Buffer:{' '}
-                        {p.diffSummary.beforeMarginMin >= 0
-                          ? `+${p.diffSummary.beforeMarginMin}m`
-                          : `${p.diffSummary.beforeMarginMin}m`}{' '}
-                        →{' '}
-                        {p.diffSummary.afterMarginMin >= 0
-                          ? `+${p.diffSummary.afterMarginMin}m`
-                          : `${p.diffSummary.afterMarginMin}m`}
-                      </span>
+                      {p.previewEvaluation && (
+                        <span className={`chip ${p.previewEvaluation.isValid ? 'tone-ok' : 'tone-danger'}`}>
+                          Projected finish: {formatMinutes(p.previewEvaluation.totalEndMin)} (
+                          {p.previewEvaluation.isValid
+                            ? 'All hard conflicts resolved'
+                            : `${p.previewEvaluation.errorCount} hard conflicts remain`}
+                          )
+                        </span>
+                      )}
                     </div>
 
-                    {p.previewEvaluation && (
-                      <p className="mt-1 text-[11px] text-stone-600">
-                        Projected finish: {formatMinutes(p.previewEvaluation.totalEndMin)} (
-                        {p.previewEvaluation.isValid
-                          ? 'All hard conflicts resolved'
-                          : `${p.previewEvaluation.errorCount} hard conflicts remain`}
-                        )
-                      </p>
-                    )}
+                    <div className="mt-3 grid grid-cols-2 gap-2 tabular-nums">
+                      <DiffStat
+                        label="Conflicts"
+                        before={String(p.diffSummary.beforeErrors)}
+                        after={String(p.diffSummary.afterErrors)}
+                        improved={p.diffSummary.afterErrors < p.diffSummary.beforeErrors}
+                      />
+                      <DiffStat
+                        label="Buffer"
+                        before={p.diffSummary.beforeMarginMin >= 0 ? `+${p.diffSummary.beforeMarginMin}m` : `${p.diffSummary.beforeMarginMin}m`}
+                        after={p.diffSummary.afterMarginMin >= 0 ? `+${p.diffSummary.afterMarginMin}m` : `${p.diffSummary.afterMarginMin}m`}
+                        improved={p.diffSummary.afterMarginMin > p.diffSummary.beforeMarginMin}
+                      />
+                    </div>
 
-                    <div className="mt-2.5 flex items-center gap-2">
+                    <div className="mt-3 flex items-center gap-2">
                       {p.status === 'pending' ? (
                         <>
                           <button
                             type="button"
                             data-testid="keep-proposal-btn"
                             onClick={() => onKeepProposal(p.id)}
-                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                            className="btn btn-primary min-h-10 px-4"
                           >
-                            <Check className="h-3.5 w-3.5" />
+                            <Check className="h-4 w-4" />
                             Keep Changes
                           </button>
                           <button
                             type="button"
                             data-testid="discard-proposal-btn"
                             onClick={() => onDiscardProposal(p.id)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+                            className="btn btn-outline min-h-10 px-4"
                           >
-                            <X className="h-3.5 w-3.5" />
+                            <X className="h-4 w-4" />
                             Discard
                           </button>
                         </>
                       ) : (
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                            p.status === 'kept'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-stone-200 text-stone-700'
-                          }`}
-                        >
+                        <span className={`chip ${p.status === 'kept' ? 'tone-ok' : 'tone-neutral'}`}>
+                          {p.status === 'kept' ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
                           {p.status === 'kept' ? 'Kept & Applied to Timeline' : 'Discarded'}
                         </span>
                       )}
@@ -736,5 +721,80 @@ export function HybridStudioPane({
         )}
       </div>
     </section>
+  );
+}
+
+function DiffStat({ label, before, after, improved }: { label: string; before: string; after: string; improved: boolean }) {
+  return (
+    <div className="rounded-[var(--radius-control)] border border-line bg-surface px-3 py-2.5">
+      <p className="kicker">{label}</p>
+      <p className="mt-1 flex items-baseline gap-2 font-display text-title font-bold">
+        <span className="text-ink-3 line-through decoration-line-strong">{before}</span>
+        <ArrowRight className="h-4 w-4 self-center text-ink-3" />
+        <span className={improved ? 'text-ok' : 'text-ink'}>{after}</span>
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Device <- Firebase AI Logic -> Cloud. Lights the path the latest run actually took,
+ * read from the same SDK-confirmed source as the proposal badge.
+ */
+function HybridRouteStrip({ latest }: { latest?: TripProposal }) {
+  const route: RouteState = latest ? describeProposalSource(latest).route : 'idle';
+  const deviceLit = route === 'device' || route === 'blocked';
+  const cloudLit = route === 'cloud';
+  const deviceTone: Tone = route === 'blocked' ? 'guard' : 'device';
+  const caption = (() => {
+    switch (route) {
+      case 'device': return { text: 'Last run executed on this device', tone: 'device' as Tone };
+      case 'cloud': return { text: 'Last run executed in the cloud', tone: 'cloud' as Tone };
+      case 'blocked': return { text: 'Last run stopped on this device · 0 bytes sent', tone: 'guard' as Tone };
+      case 'running': return { text: 'Running · source not yet confirmed', tone: 'neutral' as Tone };
+      case 'emulator': return { text: 'Last run used the local emulator', tone: 'neutral' as Tone };
+      case 'failed': return { text: 'Last run did not complete', tone: 'danger' as Tone };
+      case 'unverified': return { text: 'Last run source not confirmed · result not used', tone: 'guard' as Tone };
+      default: return { text: 'Run a task to light up the route it takes', tone: 'neutral' as Tone };
+    }
+  })();
+
+  const node = (lit: boolean, tone: Tone, icon: React.ReactNode, title: string, sub: string) => (
+    <div className={`flex min-w-0 flex-1 flex-row items-center gap-2.5 rounded-[var(--radius-control)] border px-3 py-2 text-left transition ${
+      lit ? `tone-${tone} shadow-[var(--shadow-raised)]` : 'border-line bg-surface text-ink-3'}`}>
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+        lit ? (tone === 'cloud' ? 'bg-cloud text-white' : tone === 'guard' ? 'bg-guard text-white' : tone === 'neutral' ? 'bg-ink text-white' : 'bg-device text-white') : 'bg-surface-2 text-ink-3'}`}>
+        {icon}
+      </span>
+      <span className="w-full min-w-0">
+        <span className={`block text-meta leading-tight font-bold sm:truncate ${lit ? '' : 'text-ink-2'}`}>{title}</span>
+        <span className="block text-[0.6875rem] leading-tight opacity-80">{sub}</span>
+      </span>
+    </div>
+  );
+  const link = (lit: boolean, tone: Tone, blocked = false) => (
+    <div className="relative flex h-4 items-center justify-center sm:h-auto sm:w-8 sm:shrink-0" aria-hidden="true">
+      <span className={`h-full w-0.5 rounded sm:h-0.5 sm:w-full ${lit ? (tone === 'cloud' ? 'bg-cloud' : tone === 'guard' ? 'bg-guard' : 'bg-device') : 'bg-line-strong'} ${blocked ? 'opacity-40' : ''}`} />
+      {blocked && <Ban className="absolute left-1/2 h-4 w-4 -translate-x-1/2 bg-surface-2 text-guard" />}
+    </div>
+  );
+
+  return (
+    <div className="px-3.5 py-3 sm:px-4" data-testid="hybrid-route-strip" data-route={route}>
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5">
+        <span className="kicker">Inference route</span>
+        <span className={`chip min-h-6 whitespace-normal py-0.5 tone-${caption.tone}`}>
+          <span className="dot" />
+          {caption.text}
+        </span>
+      </div>
+      <div className="flex flex-col sm:flex-row sm:items-stretch">
+        {node(deviceLit, deviceTone, <Cpu className="h-4 w-4" />, 'This device', 'Gemini Nano')}
+        {link(deviceLit, deviceTone)}
+        {node(route !== 'idle', route === 'cloud' ? 'cloud' : deviceLit ? deviceTone : 'neutral', <Layers className="h-4 w-4" />, 'Firebase AI Logic', 'firebase/ai')}
+        {link(cloudLit, 'cloud', route === 'blocked')}
+        {node(cloudLit, 'cloud', <Cloud className="h-4 w-4" />, 'Cloud', 'gemini-3.5-flash-lite')}
+      </div>
+    </div>
   );
 }

@@ -12,6 +12,7 @@ import {
 import type { LocalModelAvailability } from '../ai/hybridInferenceService';
 import type { AppCheckMode } from '../domain/proposal';
 import type { Trip } from '../domain/trip';
+import type { Tone } from './sourcePresentation';
 
 interface HeaderBarProps {
   trips: Trip[];
@@ -31,6 +32,32 @@ interface HeaderBarProps {
   isLiveProject: boolean;
   usingEmulator: boolean;
   onOpenSetup: () => void;
+}
+
+export function BrandMark({ className = 'h-10 w-10' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect width="64" height="64" rx="16" fill="var(--color-device)" />
+      <path d="M18 44V20l14 14 14-14v24" stroke="#FFFFFF" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <circle cx="32" cy="17" r="4" fill="#F7D488" />
+      <circle cx="48" cy="46" r="6" fill="var(--color-cloud)" stroke="#FFFFFF" strokeWidth="2.5" />
+    </svg>
+  );
+}
+
+/** One labelled readout in the hybrid status rail. */
+function StatusCell({ label, tone, testId, icon, children }: {
+  label: string; tone: Tone; testId?: string; icon: React.ReactNode; children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 max-w-full flex-col gap-1 px-2 py-1.5 sm:px-4 lg:shrink-0 sm:first:pl-0">
+      <span className="kicker">{label}</span>
+      <span data-testid={testId} className={`chip tone-${tone}`}>
+        {icon}
+        {children}
+      </span>
+    </div>
+  );
 }
 
 export function HeaderBar({
@@ -60,32 +87,16 @@ export function HeaderBar({
     nanoAvailability === 'available' ? 'On-device inference is available.' :
     nanoAvailability === 'downloadable' || nanoAvailability === 'downloading'
       ? 'On-device inference needs setup.' : 'On-device inference is unavailable in this browser.';
-  const nanoBadge = (() => {
-    if (downloadPercent !== null && downloadPercent < 100) {
-      return {
-        label: `Downloading Nano ${downloadPercent}%`,
-        className: 'bg-amber-50 text-amber-800 border-amber-200',
-      };
-    }
-    if (nanoChecking) {
-      return { label: 'Checking device support…', className: 'bg-stone-100 text-stone-700 border-stone-200' };
-    }
-    if (nanoAvailability === 'available') {
-      return {
-        label: 'On-Device AI: available',
-        className: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-      };
-    }
+  const downloading = downloadPercent !== null && downloadPercent < 100;
+
+  const nanoBadge: { label: string; tone: Tone } = (() => {
+    if (downloading) return { label: `Downloading Nano ${downloadPercent}%`, tone: 'guard' };
+    if (nanoChecking) return { label: 'Checking device support…', tone: 'neutral' };
+    if (nanoAvailability === 'available') return { label: 'On-Device AI: available', tone: 'device' };
     if (nanoAvailability === 'downloadable' || nanoAvailability === 'downloading') {
-      return {
-        label: `On-Device AI: ${nanoAvailability}`,
-        className: 'bg-amber-50 text-amber-800 border-amber-200',
-      };
+      return { label: `On-Device AI: ${nanoAvailability}`, tone: 'guard' };
     }
-    return {
-      label: 'On-Device AI: unavailable',
-      className: 'bg-stone-100 text-stone-700 border-stone-200',
-    };
+    return { label: 'On-Device AI: unavailable', tone: 'neutral' };
   })();
 
   const appCheckLabel = (() => {
@@ -95,40 +106,40 @@ export function HeaderBar({
     if (appCheckMode === 'local_emulator_provider') return 'App Check: Emulator';
     return isLiveProject ? 'App Check: Pending' : 'App Check: Local-Only';
   })();
+  const appCheckTone: Tone = appCheckMode === 'unconfigured' ? 'neutral' : 'cloud';
 
   return (
-    <header className="border-b border-stone-200 bg-white">
-      <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-xs">
-            <Cpu className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-bold tracking-tight text-stone-900 sm:text-lg">
-                LvSyn Hybrid Trip Companion
-              </h1>
-              <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600">
-                Firebase AI Logic
-              </span>
+    <header>
+      {/* Brand band */}
+      <div className="bg-night text-white">
+        <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-3 py-4 sm:px-8 sm:py-5">
+          <div className="flex min-w-0 items-center gap-3.5">
+            <BrandMark className="h-11 w-11 shrink-0 drop-shadow" />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <h1 className="font-display text-title font-bold tracking-tight sm:text-display">
+                  LvSyn Hybrid Trip Companion
+                </h1>
+                <span className="rounded-full border border-white/20 bg-white/10 px-2.5 py-0.5 text-meta font-semibold text-white/90">
+                  Firebase AI Logic
+                </span>
+              </div>
+              <p className="mt-0.5 text-meta text-white/75 sm:text-body">
+                On-device Chrome Gemini Nano + gated cloud text + deterministic schedule verification
+              </p>
+              <p className="mt-1 text-meta font-medium text-white/90" role="status">
+                {deviceStatus} {cloudStatus} Itinerary editing works offline.
+              </p>
             </div>
-            <p className="text-xs text-stone-500">
-              On-device Chrome Gemini Nano + gated cloud text + deterministic schedule verification
-            </p>
-            <p className="mt-1 text-xs font-medium text-stone-700" role="status">
-              {deviceStatus} {cloudStatus} Itinerary editing works offline.
-            </p>
           </div>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg border border-stone-200 bg-stone-50 p-1">
+          <div className="flex w-full items-center gap-1 rounded-[var(--radius-control)] border border-white/15 bg-white/10 p-1 sm:w-auto">
             <select
               aria-label="Select preset trip"
               data-testid="trip-selector"
               value={activeTripId}
               onChange={(e) => onSelectTrip(e.target.value)}
-              className="trip-native-select rounded-md bg-white px-2.5 py-1 text-xs font-medium text-stone-800 outline-none"
+              className="trip-native-select min-h-8 min-w-0 flex-1 rounded-lg bg-white px-2.5 text-meta font-semibold text-ink outline-none sm:flex-none"
             >
               {trips.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -140,85 +151,95 @@ export function HeaderBar({
               type="button"
               onClick={onResetTrips}
               title="Reset sample itineraries"
-              className="rounded-md p-1.5 text-stone-500 transition hover:bg-white hover:text-stone-900"
+              aria-label="Reset sample itineraries"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/10 hover:text-white"
             >
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className="h-4 w-4" />
             </button>
           </div>
+        </div>
+      </div>
 
-          <span
-            data-testid="network-badge"
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${
-              isOnline
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                : 'border-rose-200 bg-rose-50 text-rose-800'
-            }`}
+      {/* Hybrid status rail */}
+      <div className="border-b border-line bg-surface/85 backdrop-blur">
+        <div className="mx-auto flex max-w-[1440px] flex-wrap items-end gap-y-1 px-2 py-2 sm:px-8 sm:py-2.5 lg:flex-nowrap lg:divide-x lg:divide-line">
+          <StatusCell
+            label="Network"
+            tone={isOnline ? 'ok' : 'danger'}
+            testId="network-badge"
+            icon={isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
           >
-            {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
             {isOnline ? 'Online' : 'Offline'}
-          </span>
+          </StatusCell>
 
-          <span
-            data-testid="nano-badge"
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${nanoBadge.className}`}
+          <div className="flex min-w-0 max-w-full flex-col gap-1 px-2 py-1.5 sm:px-4 lg:shrink-0">
+            <span className="kicker">This device</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span data-testid="nano-badge" className={`chip tone-${nanoBadge.tone}`}>
+                <Cpu className="h-3.5 w-3.5" />
+                {nanoBadge.label}
+              </span>
+              {nanoAvailability !== 'available' && (
+                <button
+                  type="button"
+                  data-testid="init-nano-btn"
+                  disabled={!canPrepareDevice || downloading}
+                  onClick={onInitializeNano}
+                  className="btn btn-device min-h-6 rounded-full px-2.5 py-0"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {downloading ? `Downloading ${downloadPercent}%` : 'Enable On-Device AI'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <StatusCell
+            label="Cloud guard"
+            tone={appCheckTone}
+            testId="appcheck-badge"
+            icon={<ShieldCheck className="h-3.5 w-3.5" />}
           >
-            <Cpu className="h-3.5 w-3.5" />
-            {nanoBadge.label}
-          </span>
-
-          {nanoAvailability !== 'available' && (
-            <button
-              type="button"
-              data-testid="init-nano-btn"
-              disabled={!canPrepareDevice || downloadPercent !== null && downloadPercent < 100}
-              onClick={onInitializeNano}
-              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
-            >
-              <Download className="h-3.5 w-3.5" />
-              {downloadPercent !== null && downloadPercent < 100 ? `Downloading ${downloadPercent}%` : 'Enable On-Device AI'}
-            </button>
-          )}
-
-          <span
-            data-testid="appcheck-badge"
-            className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-700"
-          >
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
             {appCheckLabel}
-          </span>
+          </StatusCell>
 
           {usingEmulator && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-800">
-              <Cloud className="h-3.5 w-3.5" />
+            <StatusCell label="Cloud" tone="cloud" icon={<Cloud className="h-3.5 w-3.5" />}>
               Local Cloud Emulator
-            </span>
+            </StatusCell>
           )}
 
-          <label className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-700">
-            <span className="text-stone-500">Mode:</span>
-            <select
-              aria-label="Inference mode"
-              data-testid="inference-mode-select"
-              value={inferenceMode}
-              onChange={(e) => onChangeInferenceMode(e.target.value as InferenceMode)}
-              className="trip-native-select bg-transparent font-semibold text-stone-900 outline-none"
-            >
-              <option value={InferenceMode.PREFER_ON_DEVICE}>PREFER_ON_DEVICE</option>
-              <option value={InferenceMode.ONLY_ON_DEVICE}>ONLY_ON_DEVICE</option>
-              <option value={InferenceMode.PREFER_IN_CLOUD} disabled={!cloudSelectable}>PREFER_IN_CLOUD</option>
-              <option value={InferenceMode.ONLY_IN_CLOUD} disabled={!cloudSelectable}>ONLY_IN_CLOUD</option>
-            </select>
-          </label>
+          <div className="flex min-w-0 max-w-full flex-col gap-1 px-2 py-1.5 sm:px-4 lg:shrink-0">
+            <span className="kicker">Routing</span>
+            <label className="chip tone-neutral pr-1.5">
+              <span className="text-ink-3">Mode:</span>
+              <select
+                aria-label="Inference mode"
+                data-testid="inference-mode-select"
+                value={inferenceMode}
+                onChange={(e) => onChangeInferenceMode(e.target.value as InferenceMode)}
+                className="trip-native-select bg-transparent font-mono font-semibold text-ink outline-none"
+              >
+                <option value={InferenceMode.PREFER_ON_DEVICE}>PREFER_ON_DEVICE</option>
+                <option value={InferenceMode.ONLY_ON_DEVICE}>ONLY_ON_DEVICE</option>
+                <option value={InferenceMode.PREFER_IN_CLOUD} disabled={!cloudSelectable}>PREFER_IN_CLOUD</option>
+                <option value={InferenceMode.ONLY_IN_CLOUD} disabled={!cloudSelectable}>ONLY_IN_CLOUD</option>
+              </select>
+            </label>
+          </div>
 
-          <button
-            type="button"
-            data-testid="firebase-setup-btn"
-            onClick={onOpenSetup}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-700 transition hover:bg-stone-50"
-          >
-            <Settings className="h-3.5 w-3.5" />
-            Firebase Setup
-          </button>
+          <div className="flex min-w-0 max-w-full flex-col gap-1 px-2 py-1.5 sm:px-4 lg:shrink-0">
+            <span className="kicker">Project</span>
+            <button
+              type="button"
+              data-testid="firebase-setup-btn"
+              onClick={onOpenSetup}
+              className="btn btn-outline min-h-7 rounded-full px-3 py-0"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              <span>Firebase Setup</span>
+            </button>
+          </div>
         </div>
       </div>
     </header>

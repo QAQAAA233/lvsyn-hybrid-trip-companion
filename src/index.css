@@ -1,25 +1,210 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens — one source of truth for color, type, spacing, radius and elevation.
+ * Semantic roles (not hues) drive every component:
+ *   ink/paper/line  → neutral structure
+ *   device          → work that ran or stayed on this device (Gemini Nano, local engine)
+ *   cloud           → work that went through Firebase AI Logic to the cloud model
+ *   guard           → a request stopped locally before dispatch (privacy shield, caution)
+ *   danger          → a hard schedule conflict or failed run
+ *   ok              → deterministic verification passed
+ */
+@theme {
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Inter", "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+
+  --color-paper: #f3f0e9;
+  --color-surface: #ffffff;
+  --color-surface-2: #f9f7f2;
+  --color-line: #e6e0d4;
+  --color-line-strong: #d3cabb;
+  --color-ink: #15211d;
+  --color-ink-2: #3d4945;
+  --color-ink-3: #69736e;
+  --color-night: #10201b;
+  --color-night-2: #1b302a;
+
+  --color-device: #0b7285;
+  --color-device-strong: #085a69;
+  --color-device-soft: #e3f2f4;
+  --color-device-line: #a5d3da;
+
+  --color-cloud: #4c51bf;
+  --color-cloud-strong: #3c3f9e;
+  --color-cloud-soft: #ebecfb;
+  --color-cloud-line: #bcc0f1;
+
+  --color-guard: #b45309;
+  --color-guard-strong: #8a3f06;
+  --color-guard-soft: #fdf3e3;
+  --color-guard-line: #f0cf9c;
+
+  --color-danger: #be2f45;
+  --color-danger-strong: #951f33;
+  --color-danger-soft: #fcebee;
+  --color-danger-line: #f1b9c3;
+
+  --color-ok: #1f7a4d;
+  --color-ok-strong: #175c3a;
+  --color-ok-soft: #e6f4ec;
+  --color-ok-line: #a9d8bd;
+
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1.1rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.35rem;
+  --text-title: 1.125rem;
+  --text-title--line-height: 1.5rem;
+  --text-display: 1.625rem;
+  --text-display--line-height: 2rem;
+
+  --radius-chip: 999px;
+  --radius-control: 0.625rem;
+  --radius-panel: 0.875rem;
+  --radius-card: 1.25rem;
+
+  --shadow-card: 0 1px 0 rgb(21 33 29 / 0.04), 0 12px 32px -18px rgb(21 33 29 / 0.28);
+  --shadow-raised: 0 1px 0 rgb(21 33 29 / 0.05), 0 6px 16px -8px rgb(21 33 29 / 0.25);
+  --shadow-focus: 0 0 0 3px rgb(11 114 133 / 0.28);
+}
+
 @layer base {
   :root {
-    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
     color-scheme: light;
+    -webkit-font-smoothing: antialiased;
   }
 
   body {
-    background-color: #f8f7f4;
-    color: #1c1917;
+    background-color: var(--color-paper);
+    color: var(--color-ink);
     margin: 0;
   }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+  }
+}
+
+:where(button, select, textarea, input, a):focus-visible {
+  outline: 2px solid var(--color-device);
+  outline-offset: 2px;
+  box-shadow: var(--shadow-focus);
+}
+
+@layer components {
+  /* Surfaces */
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  .panel {
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-panel);
+  }
+  .kicker {
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+  }
+
+  /* Controls */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 2.25rem;
+    padding: 0 0.875rem;
+    border-radius: var(--radius-control);
+    border: 1px solid transparent;
+    font-size: var(--text-meta);
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    transition: background-color 150ms, border-color 150ms, color 150ms, box-shadow 150ms;
+    cursor: pointer;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary { background: var(--color-ink); color: #fff; box-shadow: var(--shadow-raised); }
+  .btn-primary:hover:not(:disabled) { background: var(--color-night-2); }
+  .btn-device { background: var(--color-device); color: #fff; box-shadow: var(--shadow-raised); }
+  .btn-device:hover:not(:disabled) { background: var(--color-device-strong); }
+  .btn-cloud { background: var(--color-cloud); color: #fff; box-shadow: var(--shadow-raised); }
+  .btn-cloud:hover:not(:disabled) { background: var(--color-cloud-strong); }
+  .btn-outline { background: var(--color-surface); color: var(--color-ink-2); border-color: var(--color-line-strong); }
+  .btn-outline:hover:not(:disabled) { background: var(--color-surface-2); color: var(--color-ink); }
+  .btn-outline-device { background: var(--color-surface); color: var(--color-device-strong); border-color: var(--color-device-line); }
+  .btn-outline-device:hover:not(:disabled) { background: var(--color-device-soft); }
+  .btn-icon { min-width: 2.25rem; padding: 0; }
+
+  .field {
+    width: 100%;
+    min-height: 2.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    transition: border-color 150ms, box-shadow 150ms;
+  }
+  .field:focus {
+    outline: 2px solid var(--color-device);
+    outline-offset: 2px;
+    border-color: var(--color-device);
+    box-shadow: var(--shadow-focus);
+  }
+
+  /* Chips — one shape for every badge, tone set by a semantic modifier */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 1.5rem;
+    padding: 0.125rem 0.625rem;
+    border-radius: var(--radius-chip);
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    color: var(--color-ink-2);
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .tone-neutral { background: var(--color-surface-2); border-color: var(--color-line); color: var(--color-ink-2); }
+  .tone-device { background: var(--color-device-soft); border-color: var(--color-device-line); color: var(--color-device-strong); }
+  .tone-cloud { background: var(--color-cloud-soft); border-color: var(--color-cloud-line); color: var(--color-cloud-strong); }
+  .tone-guard { background: var(--color-guard-soft); border-color: var(--color-guard-line); color: var(--color-guard-strong); }
+  .tone-danger { background: var(--color-danger-soft); border-color: var(--color-danger-line); color: var(--color-danger-strong); }
+  .tone-ok { background: var(--color-ok-soft); border-color: var(--color-ok-line); color: var(--color-ok-strong); }
+
+  /* Status dot used in readouts and the route strip */
+  .dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; background: currentColor; flex-shrink: 0; }
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
 
-:where(button, select, textarea, input, a):focus-visible {
-  outline: 2px solid #047857;
-  outline-offset: 2px;
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }
 
 .setup-dialog {
@@ -30,9 +215,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :where(button, a, [role="tab"], article) {
-    transition-duration: 0ms;
-    animation-duration: 0ms;
+  :where(button, a, [role="tab"], article, .btn, .chip, .field) {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
   }
 }
 

@@ -362,7 +362,7 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F7F4] text-stone-900">
+    <div className="min-h-screen bg-paper text-ink">
       <HeaderBar
         trips={trips}
         activeTripId={activeTrip.id}
@@ -387,7 +387,7 @@ export function App() {
         onOpenSetup={() => setSetupOpen(true)}
       />
 
-      <main className="mx-auto grid max-w-[1440px] grid-cols-1 gap-5 px-4 py-5 sm:px-6 lg:grid-cols-12">
+      <main className="mx-auto grid max-w-[1440px] grid-cols-1 gap-5 px-3 py-5 sm:px-8 sm:py-7 lg:grid-cols-12 lg:gap-6">
         <div id="local-itinerary" tabIndex={-1} className="lg:col-span-6">
           <ItineraryPane
             trip={activeTrip}
